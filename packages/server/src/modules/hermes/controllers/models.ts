@@ -964,15 +964,17 @@ export async function fetchProviderModelList(ctx: any) {
       return
     }
 
-    const data = await res.json() as { data?: Array<{ id?: unknown }> }
-    if (!Array.isArray(data.data)) {
+    const data = await res.json() as { data?: Array<{ id?: unknown; slug?: unknown; name?: unknown }>; models?: Array<{ id?: unknown; slug?: unknown; name?: unknown }> }
+    // OpenAI 兼容格式为 { data: [...] }; Codex 目录格式(cc-switch 等)为 { models: [...] } — 两者都接受
+    const rawList = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : null)
+    if (!rawList) {
       ctx.status = 502
       ctx.body = { error: 'Provider returned unexpected format' }
       return
     }
 
-    let models = data.data
-      .map(m => String(m?.id || '').trim())
+    let models = rawList
+      .map(m => String(m?.id || m?.slug || m?.name || '').trim())
       .filter(Boolean)
     if (freeOnly) models = models.filter(m => m.endsWith(':free'))
     const uniqueModels = Array.from(new Set(models)).sort()

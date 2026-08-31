@@ -233,12 +233,14 @@ export async function fetchProviderModels(baseUrl: string, apiKey: string, freeO
       logger.warn('available-models %s returned %d', modelsUrl, res.status)
       return []
     }
-    const data = await res.json() as { data?: Array<{ id: string }> }
-    if (!Array.isArray(data.data)) {
+    const data = await res.json() as { data?: Array<{ id: string }>; models?: Array<{ id?: string; slug?: string; name?: string }> }
+    // 兼容 OpenAI { data: [...] } 与 Codex 目录 { models: [...] } 两种格式
+    const rawList = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : null)
+    if (!rawList) {
       logger.warn('available-models %s returned unexpected format', modelsUrl)
       return []
     }
-    let models = data.data.map(m => m.id)
+    let models = rawList.map(m => (m as { id?: string }).id || (m as { slug?: string }).slug || (m as { name?: string }).name || '')
     // Gemini returns model IDs with "models/" prefix. Strip to avoid double
     // prefix when Hermes native adapter constructs .../models/{model}:generateContent
     if (base.includes('generativelanguage.googleapis.com')) {

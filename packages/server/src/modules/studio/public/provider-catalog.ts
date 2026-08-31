@@ -12,12 +12,14 @@ export async function fetchProviderModels(baseUrl: string, apiKey: string, freeO
       logger.warn('available-models %s returned %d', modelsUrl, response.status)
       return []
     }
-    const data = await response.json() as { data?: Array<{ id: string }> }
-    if (!Array.isArray(data.data)) {
+    const data = await response.json() as { data?: Array<{ id: string }>; models?: Array<{ id?: string; slug?: string; name?: string }> }
+    // 兼容 OpenAI { data: [...] } 与 Codex 目录 { models: [...] } 两种格式
+    const rawList = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : null)
+    if (!rawList) {
       logger.warn('available-models %s returned unexpected format', modelsUrl)
       return []
     }
-    let models = data.data.map(model => model.id)
+    let models = rawList.map(model => (model as { id?: string; slug?: string; name?: string }).id || (model as { slug?: string }).slug || (model as { name?: string }).name || '')
     if (base.includes('generativelanguage.googleapis.com')) {
       models = models.map(model => model.startsWith('models/') ? model.slice('models/'.length) : model)
     }
