@@ -9,7 +9,8 @@
   const update = () => {
     const h = window.visualViewport.height
     const kb = Math.max(0, window.innerHeight - h)
-    root.style.setProperty('--vh', h + 'px')
+    // app 约定 --vh = 1% 视口高 (global.scss: --vh: 1vh/1dvh), 此处必须除以 100
+    root.style.setProperty('--vh', (h / 100) + 'px')
     root.classList.toggle('keyboard-open', kb > 120)
     last = h
   }
