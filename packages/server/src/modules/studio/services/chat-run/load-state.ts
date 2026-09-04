@@ -1,7 +1,9 @@
 import {
   getSession,
   getSessionDetailPaginated,
+  type PaginatedSessionDetailResult,
 } from '../../repositories/session-store'
+import { getSessionDetailPaginatedFromDbWithProfile } from '../../../hermes/services/history/sessions-db'
 import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store'
 import { logger } from '../../public/logging'
 import { handleMessage } from './message-format'
@@ -51,7 +53,21 @@ export function resolveRunSource(source?: string, sessionId?: string): ChatRunSo
 export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<string, SessionState>): Promise<SessionState> {
   try {
     const displayStartedAt = Date.now()
-    const actualDetail = getSessionDetailPaginated(sid)
+    let actualDetail = getSessionDetailPaginated(sid)
+
+    // Fallback: session lives in ~/.hermes/state.db (e.g. desktop sessions),
+    // not in the studio-local DB. Read it read-only from the shared state DB.
+    if (!actualDetail) {
+      try {
+        const fallbackDetail = await getSessionDetailPaginatedFromDbWithProfile(sid, 'default')
+        if (fallbackDetail) {
+          actualDetail = fallbackDetail as unknown as PaginatedSessionDetailResult
+          logger.info('[chat-run-socket] session %s loaded from shared state.db fallback (%d messages)', sid, fallbackDetail.messages.length)
+        }
+      } catch (fallbackErr) {
+        logger.warn(fallbackErr, '[chat-run-socket] state.db fallback failed for %s', sid)
+      }
+    }
 
     const messages = actualDetail?.messages ? handleMessage(actualDetail.messages, sid) : []
     const displayElapsedMs = Date.now() - displayStartedAt

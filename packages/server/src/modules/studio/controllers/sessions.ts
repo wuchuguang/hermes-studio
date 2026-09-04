@@ -143,7 +143,7 @@ function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
 }
 
 function isVisibleWebUiSessionSource(source?: string | null): boolean {
-  return source === 'api_server' || source === 'cli' || source === 'coding_agent' || source === 'global_agent'
+  return source === 'api_server' || source === 'cli' || source === 'coding_agent' || source === 'global_agent' || source === 'desktop'
 }
 
 function isRequestedSessionSource(source: string | undefined, sessionSource?: string | null): boolean {
@@ -157,7 +157,7 @@ function requestedSessionSources(source?: string): string[] {
   if (source === 'global_agent') return ['global_agent']
   if (source === 'workflow') return ['workflow']
   if (source === 'group_chat') return ['group_chat']
-  return ['api_server', 'cli', 'coding_agent', 'global_agent']
+  return ['api_server', 'cli', 'coding_agent', 'global_agent', 'desktop']
 }
 
 function isHermesHistorySessionSource(source?: string | null): boolean {
@@ -478,12 +478,27 @@ export async function list(ctx: any) {
   const visibleProfiles = knownProfiles
     ? [...knownProfiles].filter(name => !allowedProfiles || allowedProfiles.has(name))
     : undefined
-  const allSessions = localListSessions(profile, source, effectiveLimit, {
+  let allSessions = localListSessions(profile, source, effectiveLimit, {
     sources: source ? undefined : requestedSessionSources(),
     profiles: visibleProfiles,
     includeArchived: false,
     excludeSessionIds: [...getPendingDeletedSessionIds()],
   })
+  // Merge live Hermes Agent state.db sessions (e.g. desktop) into the Chat list.
+  // Read-only: state.db stays canonical; we never write these rows locally.
+  if (!source && isHermesAgentAvailable()) {
+    try {
+      const hermesSessions = await listHermesSessionSummaries(undefined, effectiveLimit, profile)
+      const localIds = new Set(allSessions.map((session: any) => session.id))
+      const external = hermesSessions
+        .filter((session: any) => session.source === 'desktop')
+        .filter((session: any) => !localIds.has(session.id))
+        .map((session: any) => ({ ...session, webui_imported: false }))
+      if (external.length > 0) allSessions = [...allSessions, ...external]
+    } catch {
+      // state.db unavailable — Chat list falls back to local-only sessions
+    }
+  }
   ctx.body = {
     sessions: filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
       isRequestedSessionSource(source, s.source) &&

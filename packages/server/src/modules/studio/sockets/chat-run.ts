@@ -347,8 +347,13 @@ export class ChatRunSocket {
       return profile
     }
     const requireSocketSessionAccess = (sessionId: string) => {
-      const session = getSession(sessionId)
-      if (!session) throw new Error('Session not found')
+      let session = getSession(sessionId)
+      if (!session) {
+        // Sessions that live only in ~/.hermes/state.db (e.g. desktop) are not
+        // in the studio-local DB. They belong to the default profile — allow
+        // read-only resume without a local row.
+        return 'default'
+      }
       const sessionProfile = String(session.profile || 'default').trim() || 'default'
       const authorizedProfile = currentProfile()
       if (sessionProfile !== authorizedProfile) {
