@@ -1,0 +1,88 @@
+/* ============================================================
+   Hermes Studio — 手机端增强 (源码内置, 2026-09-04)
+   与 /pwa/ 注入层等价的规则, 固化进 fork 源码:
+   - 安全区 (viewport-fit=cover + env(safe-area-inset-*))
+   - 触控目标加大 (气泡操作键 36px / workspace 徽章 40px)
+   - 隐藏滚动条 / 禁双击缩放 (保留输入框文本选择)
+   - iOS 键盘 visualViewport 补偿挂载点 (由 boot.js 或全局)
+   ============================================================ */
+
+:root {
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+/* ── 类原生手感 ── */
+html { touch-action: manipulation; }
+body { -webkit-tap-highlight-color: transparent; }
+.input-textarea, textarea, input, [contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: auto;
+}
+
+/* iOS Safari 顶栏安全区 (viewport-fit=cover 下 env() 才非零) */
+.hamburger-btn { top: calc(10px + var(--safe-t)) !important; }
+
+/* 输入区底部安全区 (iPhone 小黑条) */
+.chat-input-area { padding-bottom: calc(12px + var(--safe-b)) !important; }
+.approval-bar { margin-bottom: 4px !important; }
+
+@media (max-width: 768px) {
+  /* 消息气泡操作键: 24px→36px 触控区, 视觉不变大 (margin 反向补偿) */
+  .copy-bubble-btn,
+  .reference-bubble-btn,
+  .speech-bubble-btn,
+  .fork-bubble-btn {
+    min-width: 36px;
+    min-height: 36px;
+    margin: -6px;
+    background-clip: padding-box;
+  }
+
+  /* 顶栏 workspace 徽章: 20px→40px 触控高 */
+  .workspace-badge {
+    min-height: 40px !important;
+    padding: 8px 12px !important;
+  }
+
+  .input-actions button,
+  .header-actions button,
+  .header-actions .btn,
+  .drawer-button {
+    min-width: 40px !important;
+    min-height: 40px !important;
+  }
+
+  /* 侧栏抽屉宽度限制 */
+  .session-list { max-width: 86vw !important; }
+  .session-item { min-height: 48px !important; }
+
+  /* 消息区左右留白收紧 */
+  .messages-container,
+  .chat-messages {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  /* 隐藏滚动条 (原生感) */
+  ::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+  * { scrollbar-width: none; }
+
+  /* 顶栏/侧栏安全区 */
+  .app-layout { padding-top: var(--safe-t); }
+  .sidebar { padding-top: var(--safe-t) !important; }
+  .sidebar-logo { padding-left: 16px !important; }
+}
+
+/* 键盘弹出时避免整体顶起 (keyboard-open 类由 boot.js 打) */
+@supports (height: 100dvh) {
+  html.keyboard-open .app-layout { height: 100dvh; }
+}
+
+/* PWA standalone 全屏模式增强 */
+@media (max-width: 768px) and (display-mode: standalone) {
+  .chat-main { padding-top: 0 !important; }
+}
