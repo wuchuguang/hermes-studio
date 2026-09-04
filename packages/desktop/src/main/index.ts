@@ -19,12 +19,12 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   getToken,
-  setWebUiRuntimeRestartHandler,
+  setWebUiRestartRequestHandler,
   setWebUiUnexpectedExitHandler,
   startWebUiServer,
   stopWebUiServer,
 } from './webui-server'
-import { bundledNode, desktopIcon, desktopMacTrayIcon, desktopRuntimeVersion, desktopWindowsTrayIcon, hermesBinExists, hermesBin, runtimeStorageRoot, webuiDir, webUiHome } from './paths'
+import { bundledNode, desktopIcon, desktopMacTrayIcon, desktopRuntimeVersion, desktopWindowsTrayIcon, runtimeStorageRoot, webuiDir, webUiHome } from './paths'
 import { checkForDesktopUpdates, initAutoUpdater } from './updater'
 import { t } from './desktop-i18n'
 import { resetDesktopDefaultLogin } from './desktop-login-reset'
@@ -44,6 +44,8 @@ import {
 import { BrowserManager } from './browser/browser-manager'
 import { BrowserBroker } from './browser/browser-broker'
 import type { BrowserBounds } from './browser/browser-types'
+import { migratePendingLegacyWindowsData } from './legacy-windows-data-migration'
+import { createDesktopAppLifecycle } from './app-lifecycle'
 
 const PORT = Number(process.env.HERMES_DESKTOP_PORT) || 8748
 const START_HIDDEN = process.argv.includes('--hidden')
@@ -68,7 +70,6 @@ let petWindowLoadPromise: Promise<void> | null = null
 const chatWindows = new Map<string, BrowserWindow>()
 let serverUrl: string | null = null
 let tray: Tray | null = null
-let isQuitting = false
 let appShutdownPromise: Promise<void> | null = null
 let isBootstrapping = false
 let isResettingLogin = false
@@ -80,6 +81,7 @@ let unexpectedWebUiExitCount = 0
 let unexpectedWebUiExitWindowStartedAt = 0
 let rendererRecoveryCount = 0
 let rendererRecoveryWindowStartedAt = 0
+const appLifecycle = createDesktopAppLifecycle(app)
 
 // Custom Session paths do not need Chromium's optional compression-dictionary
 // disk cache; disabling it leaves the normal HTTP cache enabled and isolated.
@@ -140,12 +142,15 @@ function showMainWindow() {
 }
 
 function quitApp() {
-  isQuitting = true
-  app.quit()
+  appLifecycle.quit()
+}
+
+function scheduleAppRestart(delayMs = 100): boolean {
+  return appLifecycle.scheduleRestart(delayMs)
 }
 
 async function prepareAppShutdown(): Promise<void> {
-  isQuitting = true
+  appLifecycle.prepareShutdown()
   if (!appShutdownPromise) {
     appShutdownPromise = (async () => {
       cancelWindowFade()
@@ -508,7 +513,7 @@ async function createWindow(): Promise<void> {
   })
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return
+    if (appLifecycle.isQuitting || !mainWindow || mainWindow.isDestroyed()) return
     console.error(`[desktop] main renderer exited reason=${details.reason} code=${details.exitCode}`)
     const now = Date.now()
     if (now - rendererRecoveryWindowStartedAt > FAILURE_RECOVERY_WINDOW_MS) {
@@ -521,13 +526,13 @@ async function createWindow(): Promise<void> {
       return
     }
     setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed() || isQuitting) return
+      if (!mainWindow || mainWindow.isDestroyed() || appLifecycle.isQuitting) return
       mainWindow.reload()
     }, 250).unref?.()
   })
 
   mainWindow.on('close', (event) => {
-    if (isQuitting) return
+    if (appLifecycle.isQuitting) return
     event.preventDefault()
     cancelWindowFade()
     mainWindow?.hide()
@@ -931,6 +936,12 @@ async function bootstrap(source?: RuntimeDownloadSource) {
   isBootstrapping = true
 
   try {
+    const legacyMigration = await migratePendingLegacyWindowsData()
+    if (legacyMigration.completed) {
+      console.log('[desktop] migrated legacy Windows Hermes data before starting local services')
+    } else if (legacyMigration.retryPending) {
+      console.warn(`[desktop] legacy Windows Hermes data migration will retry on the next launch: ${legacyMigration.error || 'unknown error'}`)
+    }
     await migratePendingRuntimeRoot(updateSplash)
     repairUpdatedDesktopRuntimeLaunchers()
     const selectedSource = source || envRuntimeDownloadSource()
@@ -955,11 +966,6 @@ async function bootstrap(source?: RuntimeDownloadSource) {
   } catch (err) {
     console.error('Failed to prepare Hermes runtime:', err)
     // Keep Studio available so Runtime recovery can happen from Agent Manager.
-  }
-
-  if (!hermesBinExists()) {
-    console.error(`hermes binary missing at ${hermesBin()}`)
-    console.error('Run: npm run prepare:runtime (to build a local Hermes runtime)')
   }
 
   try {
@@ -1001,7 +1007,7 @@ async function loadServiceFailurePage(error: unknown): Promise<void> {
 }
 
 async function recoverUnexpectedWebUiExit(details: { code: number | null; signal: NodeJS.Signals | null }): Promise<void> {
-  if (isQuitting) return
+  if (appLifecycle.isQuitting) return
   serverUrl = null
   updateTrayMenu()
 
@@ -1028,11 +1034,7 @@ ipcMain.handle('hermes-desktop:restart-app', event => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
     throw new Error('Desktop restart can only be requested from the main window')
   }
-  setTimeout(() => {
-    app.relaunch()
-    quitApp()
-  }, 100).unref?.()
-  return true
+  return scheduleAppRestart()
 })
 ipcMain.handle('hermes-desktop:open-chat-window', (event, sessionId?: unknown, profile?: unknown) => {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
@@ -1257,16 +1259,16 @@ ipcMain.handle('hermes-desktop:retry-bootstrap', async (_event, source?: Runtime
 })
 
 function runDesktopApp() {
-  setWebUiRuntimeRestartHandler(() => {
-    app.relaunch()
-    quitApp()
+  setWebUiRestartRequestHandler(() => {
+    // Leave enough time for the authenticated relay HTTP request to flush its 202 response.
+    scheduleAppRestart(250)
   })
   setWebUiUnexpectedExitHandler(details => {
     void recoverUnexpectedWebUiExit(details)
   })
   const gotLock = app.requestSingleInstanceLock(QUIT_EXISTING ? { quit: true } : undefined)
   if (!gotLock) {
-    app.quit()
+    quitApp()
     return
   }
 
@@ -1307,15 +1309,15 @@ function runDesktopApp() {
   }).catch(error => {
     console.error('[desktop] failed during Electron startup:', error)
     dialog.showErrorBox('Hermes Studio', String(error instanceof Error ? error.message : error))
-    app.quit()
+    quitApp()
   })
 
   app.on('window-all-closed', () => {
-    if (isQuitting && process.platform !== 'darwin') app.quit()
+    if (appLifecycle.isQuitting && process.platform !== 'darwin') app.quit()
   })
 
   app.on('before-quit', async (e) => {
-    if (!isQuitting && process.platform !== 'darwin') {
+    if (!appLifecycle.isQuitting && process.platform !== 'darwin') {
       e.preventDefault()
       mainWindow?.hide()
       updateTrayMenu()
@@ -1325,7 +1327,7 @@ function runDesktopApp() {
     try {
       await prepareAppShutdown()
     } finally {
-      app.exit(0)
+      appLifecycle.finalizeExit(0)
     }
   })
 }

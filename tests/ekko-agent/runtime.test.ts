@@ -10,6 +10,7 @@ import {
   DelegateTaskTool,
   DEFAULT_AGENT_MAX_STEPS,
   DEFAULT_AGENT_MODEL_MAX_RETRIES,
+  DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES,
   ModelProviderError,
   ViewImageTool,
   buildSystemPrompt,
@@ -415,7 +416,7 @@ describe('ekko-agent runtime', () => {
     tools.register(echoTool)
     const client = modelClient((_request, call) => call === 1
       ? {
-          content: '',
+          content: '继续检查:',
           toolCalls: [{ id: 'call_1', name: 'echo', arguments: { text: 'from-tool' } }],
           finishReason: 'tool_calls',
         }
@@ -428,7 +429,7 @@ describe('ekko-agent runtime', () => {
     expect(result.messages).toMatchObject([
       { role: 'system' },
       { role: 'user', content: 'use echo' },
-      { role: 'assistant', toolCalls: [{ id: 'call_1', name: 'echo' }] },
+      { role: 'assistant', content: '继续检查。', toolCalls: [{ id: 'call_1', name: 'echo' }] },
       { role: 'tool', toolCallId: 'call_1', name: 'echo', content: 'from-tool' },
       { role: 'assistant', content: 'tool said from-tool' },
     ])
@@ -969,6 +970,48 @@ describe('ekko-agent runtime', () => {
         .run({ messages: ['list profiles'], toolContext: { workspaceRoot } })
       expect(result.output.content).toBe('done')
       expect(fileURLToPath(assetUrl)).toContain(join(workspaceRoot, '.ekko-tmp', 'tool-assets'))
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('bounds oversized tool results before the next model request', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'ekko-runtime-large-result-'))
+    const largeContent = `head-${'x'.repeat(DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES)}-tail`
+    const largeTool: AgentTool = {
+      definition: {
+        name: 'large_result',
+        description: 'Return oversized text',
+        parameters: { type: 'object' },
+      },
+      async execute() {
+        return { ok: true, content: largeContent }
+      },
+    }
+    const tools = new AgentToolRegistry()
+    tools.register(largeTool)
+    let artifactPath = ''
+    const client = modelClient((request, call) => {
+      if (call === 1) {
+        return {
+          content: '',
+          toolCalls: [{ id: 'call_large', name: 'large_result', arguments: {} }],
+          finishReason: 'tool_calls',
+        }
+      }
+      const toolMessage = request.messages.find(message => message.role === 'tool')
+      expect(Buffer.byteLength(toolMessage?.content || '')).toBeLessThan(DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES + 1_000)
+      expect(toolMessage?.content).toContain('tool result truncated')
+      artifactPath = toolMessage?.content.match(/Full output saved to (.+?); inspect it/)?.[1] || ''
+      return { content: 'done', finishReason: 'stop' }
+    })
+
+    try {
+      const result = await new AgentRuntime({ modelClient: client, tools })
+        .run({ messages: ['run large tool'], toolContext: { workspaceRoot } })
+      expect(result.output.content).toBe('done')
+      expect(artifactPath).toContain(join(workspaceRoot, '.ekko-tmp', 'tool-assets'))
+      await expect(readFile(artifactPath, 'utf8')).resolves.toBe(largeContent)
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true })
     }
@@ -2163,13 +2206,48 @@ describe('ekko-agent runtime', () => {
     expect(prompt).toContain('prerequisites named by a Skill as requirements, not proof that they are installed')
     expect(prompt).toContain('perform a lightweight availability check')
     expect(prompt).toContain('Request independent tool calls together in one response')
+    expect(prompt).toContain('complete standalone sentence')
+    expect(prompt).toContain('Do not end tool-call preambles with ":" or "："')
     expect(prompt).toContain('use code_exec, including for one-line snippets')
     expect(prompt).toContain('Do not probe Node or Python with terminal_exec first')
     expect(prompt).toContain('Use terminal_exec for CLI commands')
-    expect(prompt).toContain('npx --dir')
+    expect(prompt).toContain('platform-appropriate package-manager forms')
     expect(prompt).toContain("workspace's .ekko-tmp directory")
     expect(prompt).toContain('After terminal_exec reports a [skill_validation] issue')
     expect(prompt).toContain('do not retry the operation through another tool or language runtime')
     expect(prompt).toContain('prefer a compatible installed or built-in alternative')
+  })
+
+  it('buildSystemPrompt injects Windows-native command rules on Windows', () => {
+    const prompt = buildSystemPrompt({
+      basePrompt: 'Base',
+      context: { platform: 'win32', arch: 'x64' },
+    })
+
+    expect(prompt).toContain('## Command Environment')
+    expect(prompt).toContain('Host platform: Windows (x64)')
+    expect(prompt).toContain('Do not use Unix-only commands or paths')
+    expect(prompt).toContain('command=cmd.exe')
+    expect(prompt).toContain('Windows .cmd and .bat launchers')
+    expect(prompt).toContain('Use where.exe')
+    expect(prompt).toContain('Do not use which')
+    expect(prompt).toContain('Do not invent drive letters or assume WSL is installed')
+  })
+
+  it('buildSystemPrompt injects macOS and Linux command rules independently', () => {
+    const macPrompt = buildSystemPrompt({
+      basePrompt: 'Base',
+      context: { platform: 'darwin', arch: 'arm64' },
+    })
+    const linuxPrompt = buildSystemPrompt({
+      basePrompt: 'Base',
+      context: { platform: 'linux', arch: 'x64' },
+    })
+
+    expect(macPrompt).toContain('Host platform: macOS (arm64)')
+    expect(macPrompt).toContain('BSD variants')
+    expect(macPrompt).toContain('Invoke sh or zsh explicitly')
+    expect(linuxPrompt).toContain('Host platform: Linux (x64)')
+    expect(linuxPrompt).toContain('Invoke sh or bash explicitly')
   })
 })

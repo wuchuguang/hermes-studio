@@ -31,21 +31,28 @@ function normalizePanelView(value: unknown): AppPanelView {
 }
 
 const DISMISSED_ACCESS_FAILURE_KEY = 'hermes:app-access-failure-dismissed-at'
+const APP_ACCESS_PURCHASE_URL = 'https://hermes-studio.ai/pricing/'
+const PURCHASE_REQUIRED_FAILURE_CODES = new Set([
+  'cloud_subscription_required',
+  'paid_account_required',
+  'app_access_expired',
+])
 const DEFAULT_MOBILE_RELEASE: StudioMobileRelease = {
   version: '1.0.0',
   channels: {
     androidApk: {
+      version: '1.0.0',
       githubUrl: 'https://github.com/EKKOLearnAI/hermes-studio/releases/download/v1.0.0/HStudio.apk',
       cloudflareUrl: 'https://download.ekkolearnai.com/v1.0.0/HStudio.apk',
       online: true,
     },
-    googlePlay: { url: '', online: false },
-    apple: { testFlightUrl: '', appStoreUrl: '', online: false },
+    googlePlay: { version: '1.0.0', url: '', online: false },
+    apple: { version: '1.0.0', testFlightUrl: '', appStoreUrl: '', online: false },
     harmony: { url: '', online: false },
   },
 }
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
@@ -83,7 +90,9 @@ const APP_RELAY_ROUTE_OPTIONS = [
   { value: 'cloudflare' as const, label: 'connections.app.cloudflareRoute' },
 ]
 
-const mobileVersionLabel = computed(() => `v${mobileRelease.value.version.replace(/^v/i, '')}`)
+const androidVersionLabel = computed(() => formatMobileVersion(mobileRelease.value.channels.androidApk.version))
+const googlePlayVersionLabel = computed(() => formatMobileVersion(mobileRelease.value.channels.googlePlay.version))
+const iosVersionLabel = computed(() => formatMobileVersion(mobileRelease.value.channels.apple.version))
 const androidDownloadUrl = computed(() => {
   const channel = mobileRelease.value.channels.androidApk
   const selectedUrl = downloadSource.value === 'cloudflare' ? channel.cloudflareUrl : channel.githubUrl
@@ -110,6 +119,10 @@ const appleReleaseLabel = computed(() => {
   if (channel.appStoreUrl) return 'App Store'
   return t('connections.app.iosPending')
 })
+
+function formatMobileVersion(version: string): string {
+  return version ? `v${version.replace(/^v/i, '')}` : ''
+}
 const activeAuthorization = computed(() => connectionTab.value === 'lan'
   ? lanAuthorization.value
   : cloudAuthorization.value)
@@ -127,6 +140,15 @@ const remainingTime = computed(() => {
 const accessFailureReason = computed(() => {
   const failure = accessFailure.value
   if (!failure) return ''
+  if (failure.code === 'cloud_subscription_required') {
+    return t('connections.app.accessFailures.cloudSubscriptionRequired')
+  }
+  if (failure.code === 'paid_account_required') {
+    return t('connections.app.accessFailures.paidAccountRequired')
+  }
+  if (failure.code === 'app_access_expired') {
+    return t('connections.app.accessFailures.appAccessExpired')
+  }
   if (failure.plan === 'internal' || failure.plan === 'public_beta') {
     return t('connections.app.accessFailures.tokenExpired')
   }
@@ -149,6 +171,22 @@ const accessFailureMode = computed(() => {
   const plan = accessFailure.value?.plan || 'unknown'
   const knownPlan = plan === 'internal' || plan === 'public_beta' || plan === 'paid' ? plan : 'unknown'
   return t(`connections.app.accessModes.${knownPlan}`)
+})
+const accessFailureTime = computed(() => {
+  const occurredAt = Number(accessFailure.value?.occurredAt || 0)
+  if (!occurredAt) return ''
+  return new Intl.DateTimeFormat(locale.value, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  }).format(new Date(occurredAt))
+})
+const accessFailureRequiresPurchase = computed(() => {
+  const failure = accessFailure.value
+  if (!failure) return false
+  if (PURCHASE_REQUIRED_FAILURE_CODES.has(failure.code)) return true
+  return failure.plan === 'paid'
+    && failure.code === 'app_entitlement_expired'
+    && failure.tokenTtlSeconds === 0
 })
 
 const columns = computed<DataTableColumns<AppConnection>>(() => [
@@ -259,9 +297,17 @@ async function loadConnections(options: { silent?: boolean; detectScanConnection
     const response = await fetchAppConnections()
     connections.value = response.connections
     const nextFailure = response.access_failure || null
-    accessFailure.value = nextFailure && nextFailure.occurredAt > dismissedAccessFailureAt.value
+    const previousFailureAt = Number(accessFailure.value?.occurredAt || 0)
+    const visibleFailure = nextFailure && nextFailure.occurredAt > dismissedAccessFailureAt.value
       ? nextFailure
       : null
+    accessFailure.value = visibleFailure
+    if (visibleFailure && visibleFailure.occurredAt > previousFailureAt && showScanModal.value) {
+      showScanModal.value = false
+      lanAuthorization.value = null
+      cloudAuthorization.value = null
+      qrCodeDataUrls.value = { lan: '', cloud: '' }
+    }
     if (options.detectScanConnection && showScanModal.value) {
       const connected = response.connections.some(connection => (
         connection.active
@@ -543,26 +589,38 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <template v-if="panelView === 'list'">
-      <NAlert
-        v-if="accessFailure"
-        class="app-access-failure"
-        type="error"
-        :title="t('connections.app.accessFailureTitle')"
-        :bordered="false"
-        closable
-        @close="dismissAccessFailure"
-      >
-        <div class="app-access-failure__reason">{{ accessFailureReason }}</div>
-        <div class="app-access-failure__meta">
-          <span>{{ t('connections.app.accessFailureMode', { mode: accessFailureMode }) }}</span>
-          <span v-if="accessFailure.deviceName">
-            {{ t('connections.app.accessFailureDeviceName', { deviceName: accessFailure.deviceName }) }}
-          </span>
-          <span>{{ t('connections.app.accessFailureTime', { time: new Date(accessFailure.occurredAt).toLocaleString() }) }}</span>
-        </div>
-      </NAlert>
+    <NAlert
+      v-if="accessFailure"
+      class="app-access-failure"
+      type="error"
+      :title="t('connections.app.accessFailureTitle')"
+      :bordered="false"
+      closable
+      @close="dismissAccessFailure"
+    >
+      <div class="app-access-failure__reason">{{ accessFailureReason }}</div>
+      <div class="app-access-failure__meta">
+        <span>{{ t('connections.app.accessFailureMode', { mode: accessFailureMode }) }}</span>
+        <span v-if="accessFailure.deviceName">
+          {{ t('connections.app.accessFailureDeviceName', { deviceName: accessFailure.deviceName }) }}
+        </span>
+        <span>{{ t('connections.app.accessFailureTime', { time: accessFailureTime }) }}</span>
+      </div>
+      <div v-if="accessFailureRequiresPurchase" class="app-access-failure__actions">
+        <NButton
+          tag="a"
+          :href="APP_ACCESS_PURCHASE_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          size="small"
+          type="primary"
+        >
+          {{ t('connections.app.purchaseAccess') }}
+        </NButton>
+      </div>
+    </NAlert>
 
+    <template v-if="panelView === 'list'">
       <div class="cloud-route-setting">
         <div class="cloud-route-copy">
           <strong>{{ t('connections.app.routeTitle') }}</strong>
@@ -619,8 +677,9 @@ onUnmounted(() => {
             </div>
             <p>{{ t('connections.app.downloadDescription') }}</p>
             <div class="app-download-meta">
-              <span>{{ mobileVersionLabel }}</span>
-              <span>Android · iOS</span>
+              <span>APK {{ androidVersionLabel }}</span>
+              <span>Google Play {{ googlePlayVersionLabel }}</span>
+              <span>iOS {{ iosVersionLabel }}</span>
             </div>
           </div>
 
@@ -1364,6 +1423,11 @@ onUnmounted(() => {
     gap: 4px 12px;
     color: $text-muted;
     font-size: 12px;
+  }
+
+  &__actions {
+    margin-top: 10px;
+    display: flex;
   }
 }
 

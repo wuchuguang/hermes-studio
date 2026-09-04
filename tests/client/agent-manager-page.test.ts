@@ -6,8 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const api = vi.hoisted(() => ({
   checkCodingAgentUpdate: vi.fn(),
   deleteCodingAgent: vi.fn(),
+  decideLegacyWindowsDataMigration: vi.fn(),
   fetchAgentStatusSnapshot: vi.fn(),
   fetchCodingAgentsStatus: vi.fn(),
+  fetchLegacyWindowsDataMigrationStatus: vi.fn(),
   fetchRuntimeVersionStatus: vi.fn(),
   installCodingAgent: vi.fn(),
 }))
@@ -15,6 +17,7 @@ const route = vi.hoisted(() => ({ query: {} as Record<string, string> }))
 const replaceRoute = vi.hoisted(() => vi.fn())
 const dialogWarning = vi.hoisted(() => vi.fn())
 const newChat = vi.hoisted(() => vi.fn())
+const restartApp = vi.hoisted(() => vi.fn())
 
 vi.mock('@/api/coding-agents', () => ({
   checkCodingAgentUpdate: api.checkCodingAgentUpdate,
@@ -25,6 +28,11 @@ vi.mock('@/api/coding-agents', () => ({
 
 vi.mock('@/api/agent-status', () => ({
   fetchAgentStatusSnapshot: api.fetchAgentStatusSnapshot,
+}))
+
+vi.mock('@/api/hermes/legacy-data-migration', () => ({
+  decideLegacyWindowsDataMigration: api.decideLegacyWindowsDataMigration,
+  fetchLegacyWindowsDataMigrationStatus: api.fetchLegacyWindowsDataMigrationStatus,
 }))
 
 vi.mock('@/api/hermes/runtime-versions', () => ({
@@ -106,7 +114,7 @@ const claude = {
   rawVersion: '2.0.0',
 }
 
-const missing = (id: 'codex' | 'pi', name: string, packageName: string) => ({
+const missing = (id: 'codex' | 'pi' | 'grok', name: string, packageName: string) => ({
   id,
   name,
   provider: name,
@@ -128,6 +136,10 @@ function runtimeStatus() {
       activeVersion: '0.21.0',
       agentVersion: 'v0.21.0 (2026.8.27) · upstream 3f497e2b · local 470cf66b (+1 carried commit)',
       activeDirectory: '/runtime/0.21.0',
+      pythonPath: '/runtime/0.21.0/python/venv/bin/python3',
+      agentRoot: '/runtime/0.21.0/python',
+      source: 'managed-runtime' as const,
+      dataDirectory: '/Users/test/.hermes',
       storageDirectory: '/runtime',
       defaultStorageDirectory: '/runtime',
       pendingStorageDirectory: '',
@@ -173,6 +185,7 @@ function agentStatusSnapshot() {
       { id: 'claude-code', installed: true, source: 'user-cli', path: '/usr/local/bin/claude', version: '2.0.0' },
       { id: 'codex', installed: false, source: 'not-installed', path: '', version: '' },
       { id: 'pi', installed: false, source: 'not-installed', path: '', version: '' },
+      { id: 'grok', installed: false, source: 'not-installed', path: '', version: '' },
     ],
   }
 }
@@ -195,10 +208,27 @@ describe('Agent Manager page', () => {
         claude,
         missing('codex', 'Codex', '@openai/codex'),
         missing('pi', 'Pi', '@earendil-works/pi-coding-agent'),
+        missing('grok', 'Grok', '@xai-official/grok'),
       ],
     })
     api.fetchRuntimeVersionStatus.mockResolvedValue(runtimeStatus())
     api.fetchAgentStatusSnapshot.mockResolvedValue(agentStatusSnapshot())
+    api.fetchLegacyWindowsDataMigrationStatus.mockResolvedValue({
+      supported: false,
+      shouldPrompt: false,
+      sourceDirectory: '',
+      targetDirectory: '',
+      markerPath: '',
+      decision: null,
+    })
+    api.decideLegacyWindowsDataMigration.mockResolvedValue({
+      supported: true,
+      shouldPrompt: false,
+      sourceDirectory: '',
+      targetDirectory: 'C:\\Users\\tester\\.hermes',
+      markerPath: 'C:\\Users\\tester\\.hermes\\.studio-windows-appdata-migration.json',
+      decision: { action: 'migrate', state: 'pending' },
+    })
   })
 
   function mountPage() {
@@ -258,7 +288,7 @@ describe('Agent Manager page', () => {
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('agentManager.codingAgentDescription')
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('codingAgents.installNow')
     expect(wrapper.get('.coding-agent-grid').findAll('.agent-card').map(card => card.attributes('data-testid')))
-      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi'])
+      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok'])
   })
 
   it('detects the CLI before offering Runtime management in the desktop shell', async () => {
@@ -271,6 +301,13 @@ describe('Agent Manager page', () => {
       version: '0.20.4',
     }
     api.fetchAgentStatusSnapshot.mockResolvedValue(status)
+    const cliStatus = runtimeStatus()
+    cliStatus.hermes.source = 'user-cli'
+    cliStatus.hermes.pythonPath = '/Users/test/.hermes/hermes-agent/venv/bin/python'
+    cliStatus.hermes.agentRoot = '/Users/test/.hermes/hermes-agent'
+    cliStatus.hermes.dataDirectory = '/Users/test/.hermes'
+    cliStatus.hermes.cliInstallations[0].selected = true
+    api.fetchRuntimeVersionStatus.mockResolvedValue(cliStatus)
     const wrapper = mount(AgentManagerView, {
       props: { sidebarCollapsed: false },
       global: {
@@ -285,9 +322,21 @@ describe('Agent Manager page', () => {
     expect(hermesCard.text()).not.toContain('/Users/test/.local/bin/hermes')
     expect(hermesCard.get('[data-testid="hermes-source-type"]').text()).toBe('CLI')
     expect(hermesCard.findAll('button').map(button => button.text()))
-      .toEqual(['sidebar.settings'])
+      .toEqual(['runtimeVersions.viewCliDetails', 'sidebar.settings'])
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
     expect(wrapper.getComponent({ name: 'VersionManagementModal' }).props('show')).toBe(false)
+
+    await hermesCard.get('[data-testid="view-hermes-cli-details"]').trigger('click')
+    await flushPromises()
+
+    expect(api.fetchRuntimeVersionStatus).toHaveBeenCalledWith({ includeRemote: false })
+    const details = wrapper.get('[data-testid="hermes-cli-details"]')
+    expect(details.text()).toContain('/Users/test/.hermes/hermes-agent/venv/bin/python')
+    expect(details.text()).toContain('/Users/test/.hermes/hermes-agent')
+    expect(details.text()).toContain('/Users/test/.hermes')
+    expect(details.text()).toContain('runtimeVersions.dataDirectoryEnvDescription')
+    expect(details.text()).toContain('SetEnvironmentVariable("HERMES_HOME"')
+    expect(details.text()).toContain('HERMES_HOME=/home/agent/.hermes')
   })
 
   it('does not open Runtime management when cached Hermes status is unavailable', async () => {
@@ -333,6 +382,46 @@ describe('Agent Manager page', () => {
 
     expect(wrapper.getComponent({ name: 'VersionManagementModal' }).props('show')).toBe(true)
     expect(replaceRoute).toHaveBeenCalledWith({ query: {} })
+  })
+
+  it('offers the one-time legacy Hermes data migration in the Windows desktop shell', async () => {
+    restartApp.mockResolvedValue(true)
+    ;(window as typeof window & { hermesDesktop?: { isDesktop: boolean; platform: string; restartApp: typeof restartApp } }).hermesDesktop = {
+      isDesktop: true,
+      platform: 'win32',
+      restartApp,
+    }
+    api.fetchLegacyWindowsDataMigrationStatus.mockResolvedValue({
+      supported: true,
+      shouldPrompt: true,
+      sourceDirectory: 'C:\\Users\\tester\\AppData\\Local\\hermes',
+      targetDirectory: 'C:\\Users\\tester\\.hermes',
+      markerPath: 'C:\\Users\\tester\\.hermes\\.studio-windows-appdata-migration.json',
+      decision: null,
+    })
+
+    mountPage()
+    await flushPromises()
+
+    expect(api.fetchLegacyWindowsDataMigrationStatus).toHaveBeenCalledOnce()
+    expect(dialogWarning).toHaveBeenCalledOnce()
+    const options = dialogWarning.mock.calls[0][0]
+    expect(options.title).toBe('agentManager.legacyDataMigrationTitle')
+    expect(options.positiveText).toBe('agentManager.legacyDataMigrationPositive')
+    expect(options.negativeText).toBe('agentManager.legacyDataMigrationNegative')
+    expect(options.closable).toBe(false)
+    expect(options.maskClosable).toBe(false)
+
+    await options.onPositiveClick()
+    expect(api.decideLegacyWindowsDataMigration).toHaveBeenCalledWith('migrate')
+    expect(restartApp).toHaveBeenCalledOnce()
+  })
+
+  it('does not check legacy Windows data outside the Windows desktop shell', async () => {
+    mountPage()
+    await flushPromises()
+
+    expect(api.fetchLegacyWindowsDataMigrationStatus).not.toHaveBeenCalled()
   })
 
   it('puts the available version directly on the update button', async () => {
@@ -412,7 +501,7 @@ describe('Agent Manager page', () => {
       success: false,
       message: 'npm install failed',
       tool: missing('codex', 'Codex', '@openai/codex'),
-      tools: [claude, missing('codex', 'Codex', '@openai/codex'), missing('pi', 'Pi', '@earendil-works/pi-coding-agent')],
+      tools: [claude, missing('codex', 'Codex', '@openai/codex'), missing('pi', 'Pi', '@earendil-works/pi-coding-agent'), missing('grok', 'Grok', '@xai-official/grok')],
     })
     const wrapper = mountPage()
     await flushPromises()
@@ -451,7 +540,7 @@ describe('Agent Manager page', () => {
       success: false,
       message: 'Delete completed but the command is still available',
       tool: claude,
-      tools: [claude, missing('codex', 'Codex', '@openai/codex'), missing('pi', 'Pi', '@earendil-works/pi-coding-agent')],
+      tools: [claude, missing('codex', 'Codex', '@openai/codex'), missing('pi', 'Pi', '@earendil-works/pi-coding-agent'), missing('grok', 'Grok', '@xai-official/grok')],
     })
     const wrapper = mountPage()
     await flushPromises()

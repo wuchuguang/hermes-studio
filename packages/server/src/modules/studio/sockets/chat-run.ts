@@ -54,6 +54,7 @@ import { authenticateUserToken, isAuthEnabled, type AuthenticatedUser } from '..
 import { userCanAccessProfile } from '../repositories/users-store'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observeChatRunWebhookEvent, type ChatRunWebhookAgent } from '../services/webhooks'
+import { getAgentStatusSnapshot } from '../public/agent-status-registry'
 
 type AgentBridgeBackgroundNotification = any
 type AgentBridgeBackgroundSession = any
@@ -150,20 +151,40 @@ function isHermesWorkerBackedSession(session?: { source?: string | null; agent?:
   if (!source || source === 'cli' || source === 'api_server') return true
   if (source === 'workflow' || source === 'group_chat') {
     const agent = String(session?.agent || '').trim()
-    return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'ekko-agent' && !session?.agent_session_id
+    return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'ekko-agent' && !session?.agent_session_id
   }
   if (source !== 'global_agent') return false
   const agent = String(session?.agent || '').trim()
-  return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'ekko-agent' && !session?.agent_session_id
+  return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'grok' && agent !== 'ekko-agent' && !session?.agent_session_id
 }
 
 function isBridgeRunSource(source?: string): boolean {
   return source === 'cli' || source === 'global_agent' || source === 'workflow' || source === 'group_chat'
 }
 
-export async function ensureBridgeReadyForChatRun(): Promise<{ ok: true } | { ok: false; error: string }> {
+type ChatRunBridgeReadiness =
+  | { ok: true }
+  | { ok: false; error: string; runtimeUnavailable?: true }
+
+function runtimeUnavailableForChatRun(): ChatRunBridgeReadiness | null {
+  if (process.env.HERMES_RUNTIME_SOURCE?.trim() !== 'none') return null
+  const status = getAgentStatusSnapshot().agents.find(agent => agent.id === 'hermes')
+  return {
+    ok: false,
+    error: status?.error.trim()
+      || 'Hermes Runtime is not installed or is incomplete. Open Runtime Manager to repair or download a Runtime.',
+    runtimeUnavailable: true,
+  }
+}
+
+export async function ensureBridgeReadyForChatRun(): Promise<ChatRunBridgeReadiness> {
+  const runtimeUnavailable = runtimeUnavailableForChatRun()
+  if (runtimeUnavailable) return runtimeUnavailable
+
   try {
-    const readiness = await getAgentBridgeManager().ensureReady({ timeoutMs: 1000, connectRetryMs: 0, recover: false })
+    const manager = getAgentBridgeManager()
+    await manager.start()
+    const readiness = await manager.ensureReady({ timeoutMs: 1000, connectRetryMs: 0, recover: false })
     if (readiness.reachable) {
       return { ok: true }
     }
@@ -199,6 +220,7 @@ function webhookAgentForRun(data?: { coding_agent_id?: string; agent_id?: string
   if (agent === 'ekko-agent') return 'ekko'
   if (agent === 'codex') return 'codex'
   if (agent === 'pi') return 'pi'
+  if (agent === 'grok') return 'grok'
   if (agent === 'claude-code') return 'claude-code'
   return 'bridge'
 }
@@ -893,7 +915,9 @@ export class ChatRunSocket {
           event: 'run.failed',
           session_id: data.session_id,
           queue_id: data.queue_id,
-          error: `Agent Bridge is not reachable: ${bridgeReady.error}`,
+          error: bridgeReady.runtimeUnavailable
+            ? `Hermes Runtime is unavailable: ${bridgeReady.error}`
+            : `Agent Bridge is not reachable: ${bridgeReady.error}`,
         }
         if (data.session_id) {
           observeChatRunWebhookEvent({
@@ -1451,9 +1475,9 @@ export class ChatRunSocket {
   private queueInsertionRuntime(sessionId: string, state: SessionState): QueueInsertionRuntime | null {
     const storedAgent = String(getSession(sessionId)?.agent || '').trim()
     const activeAgent = state.webhookAgent
-      || (storedAgent === 'ekko-agent' ? 'ekko' : storedAgent === 'claude' ? 'claude-code' : storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : 'bridge')
+      || (storedAgent === 'ekko-agent' ? 'ekko' : storedAgent === 'claude' ? 'claude-code' : storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : 'bridge')
     if (activeAgent === 'ekko') return 'ekko'
-    if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi') return activeAgent
+    if (activeAgent === 'claude-code' || activeAgent === 'codex' || activeAgent === 'pi' || activeAgent === 'grok') return activeAgent
     if (activeAgent !== 'bridge') return null
     if (state.source === 'coding_agent') return null
     return state.source === 'cli' || state.source === 'global_agent' ? 'hermes' : null
@@ -1539,7 +1563,7 @@ export class ChatRunSocket {
     if (!state || !control || control.generation !== generation || control.phase !== 'requesting' || !control.runId) return
 
     try {
-      if (control.runtime === 'claude-code' || control.runtime === 'codex' || control.runtime === 'pi') {
+      if (control.runtime === 'claude-code' || control.runtime === 'codex' || control.runtime === 'pi' || control.runtime === 'grok') {
         control.phase = 'stopping_current_turn'
         this.emitQueueInsertionUpdate(sessionId, control)
         const result = await codingAgentRunManager.interruptForQueueInsertion(sessionId, control.runId)
@@ -1956,7 +1980,7 @@ export class ChatRunSocket {
       sessionId,
       profile,
       source: state?.source || session?.source || 'coding_agent',
-      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'ekko-agent' ? 'ekko' : 'claude-code'),
+      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : storedAgent === 'ekko-agent' ? 'ekko' : 'claude-code'),
       payload: tagged,
       roomId: state?.webhookRoomId,
       workflowId: state?.webhookWorkflowId,
@@ -2107,7 +2131,7 @@ export class ChatRunSocket {
       sessionId,
       profile,
       source: state?.source || session?.source || 'chat',
-      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'ekko-agent' ? 'ekko' : 'bridge'),
+      agent: state?.webhookAgent || (storedAgent === 'codex' ? 'codex' : storedAgent === 'pi' ? 'pi' : storedAgent === 'grok' ? 'grok' : storedAgent === 'ekko-agent' ? 'ekko' : 'bridge'),
       payload: tagged,
       roomId: state?.webhookRoomId,
       workflowId: state?.webhookWorkflowId,
