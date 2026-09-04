@@ -767,6 +767,7 @@ const headerTitle = computed(() =>
 );
 
 const showNewChatModal = ref(false);
+const newChatAgentAvailability = ref(new Map<string, { installed: boolean }>());
 const newChatAgent = ref<"hermes" | ChatCodingAgentId>("hermes");
 const newChatAgentMode = ref<"global" | "scoped">("scoped");
 const newChatProfile = ref<string>("default");
@@ -919,14 +920,22 @@ const hiddenDefaultWorkspaces = computed(() => {
   return defaultWorkspaces.value.filter(ws => !visible.has(ws));
 });
 
-const newChatAgentOptions = computed(() => [
-  { label: "Hermes", value: "hermes" },
-  { label: "Ekko", value: "ekko-agent" },
-  { label: "Claude", value: "claude-code" },
-  { label: "Codex", value: "codex" },
-  { label: "Pi", value: "pi" },
-  { label: "Grok", value: "grok" },
-]);
+const newChatAgentOptions = computed(() => {
+  const all: Array<{ label: string; value: "hermes" | ChatCodingAgentId }> = [
+    { label: "Hermes", value: "hermes" },
+    { label: "Ekko", value: "ekko-agent" },
+    { label: "Claude", value: "claude-code" },
+    { label: "Codex", value: "codex" },
+    { label: "Pi", value: "pi" },
+    { label: "Grok", value: "grok" },
+  ];
+  // Hide agents that are not installed on this machine — only offer
+  // what the user can actually start a chat with.
+  return all.filter((option) => {
+    const record = newChatAgentAvailability.value.get(option.value);
+    return !record || record.installed;
+  });
+});
 
 const newChatApiModeOptions = computed(() => [
   { label: t("codingAgents.protocolOpenAiChat"), value: "chat_completions" },
@@ -1155,6 +1164,19 @@ async function openNewChatModal() {
   newChatCategoryId.value = null;
   try {
     await loadSessionCategories();
+    // Fetch agent install status so the agent dropdown only shows installed agents.
+    try {
+      const snapshot = await fetchAgentAvailabilitySnapshot();
+      newChatAgentAvailability.value = new Map(
+        snapshot.agents.map((agent) => [agent.id, { installed: agent.installed }]),
+      );
+    } catch {
+      newChatAgentAvailability.value = new Map();
+    }
+    // If the previously selected agent is not installed, fall back to the first available one.
+    if (!newChatAgentOptions.value.some((option) => option.value === newChatAgent.value)) {
+      newChatAgent.value = newChatAgentOptions.value[0]?.value ?? "hermes";
+    }
     if (profilesStore.profiles.length === 0) await profilesStore.fetchProfiles();
     if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
       await appStore.loadModels();
