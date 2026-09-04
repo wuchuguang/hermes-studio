@@ -338,7 +338,6 @@ export default {
     chat: 'Chat',
     backToChat: 'Volver',
     search: 'Buscar',
-    apiRelay: 'API Relay',
     history: 'Historial',
     jobs: 'Tareas programadas',
     models: 'Modelos',

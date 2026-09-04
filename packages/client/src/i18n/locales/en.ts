@@ -326,7 +326,6 @@ export default {
     chat: 'Chat',
     backToChat: 'Back',
     search: 'Search',
-    apiRelay: 'API Relay',
     history: 'History',
     jobs: 'Jobs',
     kanban: 'Kanban',

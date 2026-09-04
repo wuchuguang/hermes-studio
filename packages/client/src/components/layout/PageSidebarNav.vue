@@ -58,16 +58,11 @@ function openWorkflow() {
   if (props.active === 'workflow') return
   void router.push({ name: 'hermes.workflow' })
 }
-
-function openApiRelay() {
-  if (typeof window === 'undefined') return
-  window.open('https://apikey.fun/register?aff=LIBAPI', '_blank', 'noopener,noreferrer')
-}
 </script>
 
 <template>
   <div class="page-sidebar-nav">
-    <div class="page-sidebar-tabs" role="tablist" aria-label="Chat actions">
+    <div class="page-sidebar-actions">
       <button
         class="page-sidebar-tab"
         type="button"
@@ -100,6 +95,8 @@ function openApiRelay() {
         </svg>
         <span>{{ t('sidebar.search') }}</span>
       </button>
+    </div>
+    <div class="page-sidebar-tabs" role="tablist" aria-label="Chat actions">
       <button
         class="page-sidebar-tab"
         :class="{ active: active === 'connections' }"
@@ -172,21 +169,6 @@ function openApiRelay() {
           <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" />
         </svg>
         <span>{{ t('sidebar.models') }}</span>
-      </button>
-      <button class="page-sidebar-tab" type="button" @click="openApiRelay">
-        <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-        >
-          <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-          <polyline points="15 3 21 3 21 9" />
-          <line x1="10" y1="14" x2="21" y2="3" />
-        </svg>
-        <span>{{ t('sidebar.apiRelay') }}</span>
       </button>
     </div>
     <div class="conversation-switch conversation-switch--four" role="tablist" aria-label="Conversation type">
@@ -281,6 +263,12 @@ function openApiRelay() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.page-sidebar-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 4px;
 }
 
 .page-sidebar-tabs {
