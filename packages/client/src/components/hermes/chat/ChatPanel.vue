@@ -1730,13 +1730,31 @@ async function handleRenameConfirm() {
 const showWorkspaceModal = ref(false);
 const workspaceValue = ref("");
 const workspaceSessionId = ref<string | null>(null);
+const workspaceExtraDirs = ref<string[]>([]);
+const workspaceExtraPicking = ref(false);
+const workspaceExtraPending = ref("");
 
 function openActiveSessionWorkspace() {
   const session = chatStore.activeSession;
   if (!session?.id) return;
   workspaceSessionId.value = session.id;
   workspaceValue.value = session.workspace || "";
+  workspaceExtraDirs.value = [...(session.workspaceExtraDirs || [])];
   showWorkspaceModal.value = true;
+}
+
+function handleWorkspaceExtraAdd(dir: string | null) {
+  const value = String(dir || "").trim();
+  workspaceExtraPicking.value = false;
+  workspaceExtraPending.value = "";
+  if (!value) return;
+  if (value === (workspaceValue.value || "").trim()) return;
+  if (workspaceExtraDirs.value.includes(value)) return;
+  workspaceExtraDirs.value = [...workspaceExtraDirs.value, value];
+}
+
+function handleWorkspaceExtraRemove(dir: string) {
+  workspaceExtraDirs.value = workspaceExtraDirs.value.filter((d) => d !== dir);
 }
 
 async function handleWorkspaceConfirm() {
@@ -1744,14 +1762,19 @@ async function handleWorkspaceConfirm() {
   const ok = await setSessionWorkspace(
     workspaceSessionId.value,
     workspaceValue.value || null,
+    workspaceExtraDirs.value,
   );
   if (ok) {
     const session = chatStore.sessions.find(
       (s) => s.id === workspaceSessionId.value,
     );
-    if (session) session.workspace = workspaceValue.value || null;
+    if (session) {
+      session.workspace = workspaceValue.value || null;
+      session.workspaceExtraDirs = [...workspaceExtraDirs.value];
+    }
     if (chatStore.activeSession?.id === workspaceSessionId.value) {
       chatStore.activeSession.workspace = workspaceValue.value || null;
+      chatStore.activeSession.workspaceExtraDirs = [...workspaceExtraDirs.value];
     }
     message.success(t("chat.workspaceSet"));
   } else {
@@ -2407,10 +2430,45 @@ async function handleSessionModelCustomSubmit() {
       :title="t('chat.setWorkspaceTitle')"
       :positive-text="t('common.ok')"
       :negative-text="t('common.cancel')"
-      style="width: 520px"
+      style="width: 560px"
       @positive-click="handleWorkspaceConfirm"
     >
-      <FolderPicker v-model="workspaceValue" />
+      <div class="workspace-modal-body">
+        <FolderPicker v-model="workspaceValue" />
+        <div class="workspace-extra-section">
+          <div class="workspace-extra-header">
+            <span class="workspace-extra-title">{{ t('chat.workspaceExtraDirs') }}</span>
+            <NButton
+              size="tiny"
+              quaternary
+              type="primary"
+              @click="workspaceExtraPicking = !workspaceExtraPicking"
+            >
+              {{ workspaceExtraPicking ? t('common.cancel') : t('chat.workspaceExtraAdd') }}
+            </NButton>
+          </div>
+          <FolderPicker
+            v-if="workspaceExtraPicking"
+            v-model="workspaceExtraPending"
+            class="workspace-extra-picker"
+            @update:model-value="handleWorkspaceExtraAdd"
+          />
+          <div v-if="workspaceExtraDirs.length" class="workspace-extra-list">
+            <div v-for="dir in workspaceExtraDirs" :key="dir" class="workspace-extra-item">
+              <span class="workspace-extra-path" :title="dir">{{ dir }}</span>
+              <NButton
+                size="tiny"
+                quaternary
+                type="error"
+                @click="handleWorkspaceExtraRemove(dir)"
+              >
+                {{ t('common.delete') }}
+              </NButton>
+            </div>
+          </div>
+          <div v-else class="workspace-extra-empty">{{ t('chat.workspaceExtraEmpty') }}</div>
+        </div>
+      </div>
     </NModal>
 
     <NModal
@@ -3108,6 +3166,69 @@ async function handleSessionModelCustomSubmit() {
 
 .session-model-search {
   margin-bottom: 12px;
+}
+
+.workspace-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workspace-extra-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-extra-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.workspace-extra-title {
+  font-size: 12px;
+  color: $text-muted;
+  font-weight: 500;
+}
+
+.workspace-extra-picker {
+  margin-top: 4px;
+}
+
+.workspace-extra-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.workspace-extra-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.workspace-extra-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  direction: rtl;
+  text-align: left;
+}
+
+.workspace-extra-empty {
+  font-size: 12px;
+  color: $text-muted;
 }
 
 .session-model-kind-field {

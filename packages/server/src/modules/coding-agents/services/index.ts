@@ -270,6 +270,8 @@ export interface CodingAgentLaunchInput extends CodingAgentConfigScope {
   mode?: 'scoped' | 'global'
   model?: string
   workspace?: string | null
+  /** Additional writable directories beyond the main workspace (codex --add-dir). */
+  extraDirs?: string[]
   baseUrl?: string
   apiKey?: string
   apiMode?: ApiMode
@@ -702,6 +704,9 @@ async function resolveStoredProviderLaunchInput(
   const provider = String(inputProvider || storedProvider).trim()
   const model = String(input.model || existingSession?.model || '').trim()
   const workspace = input.workspace || existingSession?.workspace || undefined
+  const extraDirs = input.extraDirs != null
+    ? input.extraDirs
+    : (existingSession?.workspace_extra_dirs as string[] | undefined) || undefined
   let baseUrl = String(input.baseUrl || '').trim()
   let apiKey = String(input.apiKey || '').trim()
   const storedApiMode = !inputProvider || inputProvider === storedProvider
@@ -716,7 +721,7 @@ async function resolveStoredProviderLaunchInput(
   }
 
   if (!provider || (baseUrl && apiKey && apiMode)) {
-    return { ...input, profile, provider: provider || input.provider, model: model || input.model, workspace, baseUrl, apiKey, apiMode }
+    return { ...input, profile, provider: provider || input.provider, model: model || input.model, workspace, extraDirs, baseUrl, apiKey, apiMode }
   }
 
   let config: Record<string, any> = {}
@@ -773,6 +778,7 @@ async function resolveStoredProviderLaunchInput(
     provider: canonicalProvider,
     model: model || input.model,
     workspace,
+    extraDirs,
     baseUrl: baseUrl || (ignoredStaleProviderRuntime ? '' : input.baseUrl),
     apiKey: apiKey || (ignoredStaleProviderRuntime ? '' : input.apiKey),
     apiMode,
@@ -875,6 +881,22 @@ function resolveLaunchWorkspaceRoot(scope: Required<CodingAgentConfigScope>, wor
     return customWorkspace
   }
   return getScopedWorkspaceRoot(scope)
+}
+
+/** Normalize extra workspace dirs: trim, drop empties/duplicates/main-dir collisions, reject NUL. */
+export function normalizeExtraDirs(value: unknown, mainWorkspace?: string | null): string[] {
+  const list = Array.isArray(value) ? value : []
+  const main = String(mainWorkspace || '').trim()
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of list) {
+    const dir = String(item || '').trim()
+    if (!dir || dir === main || dir.includes('\0')) continue
+    if (seen.has(dir)) continue
+    seen.add(dir)
+    result.push(dir)
+  }
+  return result
 }
 
 function displayNameForModel(model: string): string {
@@ -2822,6 +2844,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     : input
   const rootDir = getScopedRuntimeConfigRoot(tool.id, scope, isolatedInput)
   const workspaceDir = resolveLaunchWorkspaceRoot(scope, input.workspace)
+  const extraDirs = normalizeExtraDirs(input.extraDirs, workspaceDir)
   await mkdir(rootDir, { recursive: true })
   await mkdir(workspaceDir, { recursive: true })
 
@@ -2908,6 +2931,8 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       '--append-system-prompt-file',
       promptPath,
       ...claudeCodePermissionArgs(),
+      // Additional writable workspace roots (mirrors codex --add-dir).
+      ...extraDirs.flatMap(dir => ['--add-dir', dir]),
     ]
   } else if (tool.id === 'codex') {
     if (apiMode !== 'chat_completions' && apiMode !== 'codex_responses' && apiMode !== 'anthropic_messages') {
@@ -3233,6 +3258,7 @@ export async function startCodingAgentRun(
     isolateSettings: true,
     piOutputMode: id === 'pi' ? 'rpc' : undefined,
   })
+  const launchExtraDirs = normalizeExtraDirs(resolvedInput.extraDirs, launch.workspaceDir)
   const commandExecutionEnv = process.platform === 'win32'
     ? {
         ...(await commandEnv()),
@@ -3259,6 +3285,7 @@ export async function startCodingAgentRun(
     args: launch.args,
     shellCommand: launch.shellCommand,
     workspaceDir: launch.workspaceDir,
+    extraDirs: launchExtraDirs,
     env: runtimeEnv,
     promptFile: launch.promptFile,
     state,
@@ -3277,6 +3304,7 @@ export async function startCodingAgentRun(
     provider: persistedProvider,
     api_mode: launch.apiMode || '',
     workspace: launch.workspaceDir,
+    workspace_extra_dirs: launchExtraDirs,
   })
   return {
     ...launch,

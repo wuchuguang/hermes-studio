@@ -87,6 +87,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   is_archived: 'INTEGER NOT NULL DEFAULT 0',
   push_enabled: 'INTEGER NOT NULL DEFAULT 0',
   workspace: 'TEXT',
+  workspace_extra_dirs: "TEXT NOT NULL DEFAULT '[]'",
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
 }

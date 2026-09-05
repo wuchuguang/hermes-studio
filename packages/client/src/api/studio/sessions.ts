@@ -549,11 +549,18 @@ export async function setSessionPushEnabled(id: string, pushEnabled: boolean): P
   }
 }
 
-export async function setSessionWorkspace(id: string, workspace: string | null): Promise<boolean> {
+export async function setSessionWorkspace(
+  id: string,
+  workspace: string | null,
+  workspaceExtraDirs?: string[],
+): Promise<boolean> {
   try {
     await request(`/api/studio/sessions/${id}/workspace`, {
       method: 'POST',
-      body: JSON.stringify({ workspace: workspace || '' }),
+      body: JSON.stringify({
+        workspace: workspace || '',
+        ...(Array.isArray(workspaceExtraDirs) ? { workspaceExtraDirs } : {}),
+      }),
     })
     return true
   } catch {

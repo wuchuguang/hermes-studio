@@ -477,6 +477,7 @@ export interface Session {
   isArchived?: boolean
   pushEnabled?: boolean
   workspace?: string | null
+  workspaceExtraDirs?: string[]
   categoryId?: number | null
   isLocalOnly?: boolean
   /** Per-session reasoning effort override.
@@ -1179,6 +1180,9 @@ function mapHermesSession(s: SessionSummary): Session {
     isArchived: Boolean(s.is_archived),
     pushEnabled: Boolean(s.push_enabled),
     workspace: s.workspace || null,
+    workspaceExtraDirs: Array.isArray((s as any).workspace_extra_dirs)
+      ? (s as any).workspace_extra_dirs.filter((d: unknown) => typeof d === 'string' && d)
+      : [],
     categoryId: s.category_id ?? null,
   }
 }
@@ -1874,6 +1878,7 @@ export const useChatStore = defineStore('chat', () => {
     codingAgentId?: ChatCodingAgentId
     codingAgentMode?: 'global' | 'scoped'
     workspace?: string | null
+    workspaceExtraDirs?: string[]
     categoryId?: number | null
     baseUrl?: string
     apiKey?: string
@@ -1896,6 +1901,7 @@ export const useChatStore = defineStore('chat', () => {
       model: options.model || undefined,
       provider: options.provider || '',
       workspace: options.workspace || null,
+      workspaceExtraDirs: options.workspaceExtraDirs || [],
       categoryId: options.categoryId ?? null,
       isLocalOnly: true,
       baseUrl: options.baseUrl,
@@ -2156,6 +2162,7 @@ export const useChatStore = defineStore('chat', () => {
     codingAgentId?: ChatCodingAgentId
     codingAgentMode?: 'global' | 'scoped'
     workspace?: string | null
+    workspaceExtraDirs?: string[]
     categoryId?: number | null
     baseUrl?: string
     apiKey?: string
@@ -2174,6 +2181,7 @@ export const useChatStore = defineStore('chat', () => {
       codingAgentId,
       codingAgentMode: options.codingAgentMode,
       workspace: options.workspace,
+      workspaceExtraDirs: options.workspaceExtraDirs,
       categoryId: options.categoryId,
       baseUrl: options.baseUrl,
       apiKey: options.apiKey,
@@ -3621,6 +3629,9 @@ export const useChatStore = defineStore('chat', () => {
         })),
         queue_id: userMsg.id,
         workspace: activeSession.value?.workspace || undefined,
+        workspace_extra_dirs: activeSession.value?.workspaceExtraDirs?.length
+          ? activeSession.value.workspaceExtraDirs
+          : undefined,
         category_id: activeSession.value?.categoryId ?? null,
         source: sessionSource,
         ...(runtimeMode.value === 'global_agent' ? { session_source: 'global_agent' as const } : {}),

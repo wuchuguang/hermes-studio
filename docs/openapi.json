@@ -16457,11 +16457,8 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "workspace": {
-                    "type": "string"
-                  }
-                }
+                "properties": {},
+                "additionalProperties": true
               }
             }
           }

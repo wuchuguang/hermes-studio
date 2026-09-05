@@ -30,6 +30,7 @@ export interface StartRunRequest {
   agent_id?: ChatCodingAgentId
   mode?: 'scoped' | 'global'
   workspace?: string | null
+  workspace_extra_dirs?: string[]
   category_id?: number | null
   baseUrl?: string
   base_url?: string

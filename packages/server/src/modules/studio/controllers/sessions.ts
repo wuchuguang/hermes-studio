@@ -429,6 +429,7 @@ export async function listConversations(ctx: any) {
     cost_status: s.cost_status,
     preview: s.preview,
     workspace: s.workspace || null,
+    workspace_extra_dirs: s.workspace_extra_dirs || [],
     is_archived: s.is_archived || 0,
     is_active: s.ended_at == null && (Date.now() / 1000 - s.last_active) <= 300,
     thread_session_count: 1,
@@ -1450,11 +1451,29 @@ export async function setPushEnabled(ctx: any) {
 }
 
 export async function setWorkspace(ctx: any) {
-  const { workspace } = ctx.request.body as { workspace?: string }
+  const body = (ctx.request.body || {}) as {
+    workspace?: string | null
+    workspaceExtraDirs?: unknown
+    workspace_extra_dirs?: unknown
+  }
+  const { workspace } = body
   if (workspace !== undefined && workspace !== null && typeof workspace !== 'string') {
     ctx.status = 400
     ctx.body = { error: 'workspace must be a string or null' }
     return
+  }
+  const rawExtraDirs = body.workspaceExtraDirs ?? body.workspace_extra_dirs
+  let extraDirs: string[] | null = null
+  if (rawExtraDirs !== undefined && rawExtraDirs !== null) {
+    if (!Array.isArray(rawExtraDirs) || rawExtraDirs.some(d => typeof d !== 'string')) {
+      ctx.status = 400
+      ctx.body = { error: 'workspaceExtraDirs must be an array of strings' }
+      return
+    }
+    const main = (workspace || '').trim()
+    extraDirs = [...new Set(
+      rawExtraDirs.map(d => String(d).trim()).filter(Boolean).filter(d => d !== main),
+    )]
   }
   const { updateSession, getSession, createSession } = await import('../public/sessions')
   const id = ctx.params.id
@@ -1463,7 +1482,9 @@ export async function setWorkspace(ctx: any) {
   if (!existing) {
     createSession({ id, profile: requestedProfile(ctx) || 'default', title: '' })
   }
-  updateSession(id, { workspace: workspace || null } as any)
+  const patch: Record<string, unknown> = { workspace: workspace || null }
+  if (extraDirs !== null) patch.workspace_extra_dirs = extraDirs
+  updateSession(id, patch as any)
   ctx.body = { ok: true }
 }
 

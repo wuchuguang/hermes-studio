@@ -44,6 +44,7 @@ export interface HermesSessionRow {
   is_archived: number
   push_enabled: number
   workspace: string | null
+  workspace_extra_dirs: string[]
   category_id: number | null
   history_revision: number
   parent_title?: string | null
@@ -107,6 +108,31 @@ function parseToolCalls(value: unknown): any[] | null {
   }
 }
 
+/** Parse the JSON-encoded workspace_extra_dirs column into a string array. */
+export function parseWorkspaceExtraDirs(value: unknown): string[] {
+  if (value == null) return []
+  if (Array.isArray(value)) {
+    return value.map(item => String(item || '').trim()).filter(Boolean)
+  }
+  if (typeof value !== 'string' || !value.trim()) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed.map(item => String(item || '').trim()).filter(Boolean)
+      : []
+  } catch {
+    return []
+  }
+}
+
+/** Serialize a directory list for the workspace_extra_dirs column. */
+export function serializeWorkspaceExtraDirs(value: unknown): string {
+  const list = Array.isArray(value)
+    ? value.map(item => String(item || '').trim()).filter(Boolean)
+    : []
+  return JSON.stringify([...new Set(list)])
+}
+
 function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
   const rawTitle = row.title != null ? String(row.title) : null
   const preview = String(row.preview || '')
@@ -146,6 +172,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     is_archived: Number(row.is_archived || 0),
     push_enabled: Number(row.push_enabled || 0) !== 0 ? 1 : 0,
     workspace: row.workspace != null ? String(row.workspace) : null,
+    workspace_extra_dirs: parseWorkspaceExtraDirs(row.workspace_extra_dirs),
     category_id: row.category_id != null ? Number(row.category_id) : null,
     history_revision: Number(row.history_revision || 0),
     parent_title: row.parent_title != null ? String(row.parent_title) : null,
@@ -194,6 +221,7 @@ export function createSession(data: {
   title?: string
   parent_session_id?: string | null
   workspace?: string
+  workspace_extra_dirs?: string[]
   category_id?: number | null
   push_enabled?: boolean | number
 }): HermesSessionRow {
@@ -213,14 +241,15 @@ export function createSession(data: {
       input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
       billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null,
       cost_status: '', preview: '', last_active: now, is_archived: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
+      workspace_extra_dirs: parseWorkspaceExtraDirs(data.workspace_extra_dirs),
       category_id: data.category_id ?? null,
       history_revision: 0,
     }
   }
   const db = getDb()!
   db.prepare(
-    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, workspace_extra_dirs, category_id, push_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     data.id,
     data.profile || 'default',
@@ -239,6 +268,7 @@ export function createSession(data: {
     now,
     now,
     data.workspace || null,
+    serializeWorkspaceExtraDirs(data.workspace_extra_dirs),
     data.category_id ?? null,
     data.push_enabled ? 1 : 0,
   )
@@ -261,6 +291,7 @@ export function createBranchedSession(data: {
   reasoning_effort?: string
   title?: string
   workspace?: string | null
+  workspace_extra_dirs?: string[]
   category_id?: number | null
   ended_at: number
   last_active: number
@@ -297,8 +328,8 @@ export function createBranchedSession(data: {
     ).run(data.ended_at, 'branched', data.parent_session_id)
 
     db.prepare(
-      `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, message_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, workspace_extra_dirs, category_id, message_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       data.id,
       data.profile || 'default',
@@ -317,6 +348,7 @@ export function createBranchedSession(data: {
       data.ended_at,
       data.last_active,
       data.workspace || null,
+      serializeWorkspaceExtraDirs(data.workspace_extra_dirs),
       data.category_id ?? null,
       data.messages.length,
     )
@@ -416,7 +448,7 @@ export function updateSession(id: string, data: Partial<Omit<HermesSessionRow, '
     // Skip last_active and ended_at - handle them separately below
     if (key === 'last_active' || key === 'ended_at') continue
     fields.push(`"${key}" = ?`)
-    values.push(val)
+    values.push(key === 'workspace_extra_dirs' ? serializeWorkspaceExtraDirs(val) : val)
   }
 
   // Handle ended_at - only update if provided, otherwise keep existing value

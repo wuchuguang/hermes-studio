@@ -385,6 +385,7 @@ export class ChatRunSocket {
       model_groups?: Array<{ provider: string; models: string[] }>
       queue_id?: string
       workspace?: string | null
+      workspace_extra_dirs?: string[]
       category_id?: number | null
       source?: string
       session_source?: 'global_agent' | 'workflow' | 'group_chat'

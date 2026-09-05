@@ -89,6 +89,8 @@ export interface CodingAgentRunLaunch {
   args: string[]
   shellCommand: string
   workspaceDir: string
+  /** Additional writable workspace directories (codex --add-dir; resume sessions use -c config override). */
+  extraDirs?: string[]
   env?: NodeJS.ProcessEnv
   promptFile?: string
   state?: SessionState
@@ -380,6 +382,30 @@ export function codexImageArgs(images: CodingAgentImageInput[]): string[] {
     const path = String(image.path || '').trim()
     return path ? ['--image', path] : []
   })
+}
+
+/** Extra writable directories for codex exec (non-resume) via repeated --add-dir. */
+export function codexAddDirArgs(extraDirs?: string[]): string[] {
+  const dirs = Array.isArray(extraDirs) ? extraDirs : []
+  return dirs.flatMap((dir) => {
+    const value = String(dir || '').trim()
+    return value ? ['--add-dir', value] : []
+  })
+}
+
+/**
+ * Extra writable roots for `codex exec resume`, which has no --add-dir flag.
+ * `--add-dir` is sugar for sandbox_workspace_write.writable_roots, so surfaced
+ * here as a -c config override. JSON string arrays are valid TOML, so
+ * JSON.stringify output works directly. Verified against codex-cli 0.145.0:
+ * resumed sessions both list the roots as workspace and can write to them.
+ */
+export function codexWritableRootsConfigArgs(extraDirs?: string[]): string[] {
+  const dirs = Array.isArray(extraDirs)
+    ? extraDirs.map((dir) => String(dir || '').trim()).filter(Boolean)
+    : []
+  if (!dirs.length) return []
+  return ['-c', `sandbox_workspace_write.writable_roots=${JSON.stringify(dirs)}`]
 }
 
 export function buildClaudeStreamJsonInput(input: string, images: CodingAgentImageInput[]): string {
@@ -2478,8 +2504,19 @@ export class CodingAgentRunManager {
       '--dangerously-bypass-approvals-and-sandbox',
     ]
     const args = run.launch.agentNativeSessionId && run.nativeResumeReady
-      ? ['exec', 'resume', ...commonArgs, run.launch.agentNativeSessionId, '-']
-      : ['exec', ...commonArgs, '--cd', run.launch.workspaceDir, '-']
+      ? [
+          'exec', 'resume', ...commonArgs,
+          // codex exec resume has no --add-dir flag; surface extra dirs as the
+          // equivalent writable_roots config override instead.
+          ...codexWritableRootsConfigArgs(run.launch.extraDirs),
+          run.launch.agentNativeSessionId, '-',
+        ]
+      : [
+          'exec', ...commonArgs, '--cd', run.launch.workspaceDir,
+          // codex exec resume has no --add-dir flag; only fresh launches can widen the sandbox.
+          ...codexAddDirArgs(run.launch.extraDirs),
+          '-',
+        ]
 
     const child = spawnCodingAgentChild(run.launch.command, args, {
       cwd: existsSync(run.launch.workspaceDir) ? run.launch.workspaceDir : homedir(),

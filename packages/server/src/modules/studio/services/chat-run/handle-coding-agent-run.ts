@@ -26,6 +26,7 @@ export interface CodingAgentRunSocketData {
   agent_id?: ChatCodingAgentId
   mode?: 'scoped' | 'global'
   workspace?: string | null
+  workspace_extra_dirs?: string[]
   category_id?: number | null
   source?: string
   baseUrl?: string
@@ -116,6 +117,7 @@ export async function handleCodingAgentRun(
       provider: launchProvider,
       model: launchModel,
       workspace: data.workspace,
+      extraDirs: data.workspace_extra_dirs,
       baseUrl: data.baseUrl || data.base_url,
       apiKey: data.apiKey || data.api_key,
       apiMode: launchApiMode,
