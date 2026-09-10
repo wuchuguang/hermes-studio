@@ -204,6 +204,11 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     requests.push(recordRequest(request))
 
+    if (pathname === '/api/studio/announcements') {
+      await route.fulfill(jsonResponse({ ok: true, platform: 'desktop', list: [] }))
+      return
+    }
+
     if (pathname === '/health') {
       await route.fulfill(jsonResponse({ status: 'ok', webui_version: '0.5.23', node_version: '23.0.0' }))
       return
@@ -215,7 +220,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
         updatedAt: '2026-01-01T00:00:00.000Z',
         agents: [
           { id: 'hermes', name: 'Hermes', provider: 'Nous Research', kind: 'hermes', installed: true, version: '0.19.1', source: 'user-cli', path: '/usr/local/bin/hermes', error: '', installations: [] },
-          { id: 'ekko-agent', name: 'Ekko', provider: 'Hermes Studio', kind: 'built-in', installed: true, version: '0.7.0', source: 'built-in', path: '', error: '', installations: [] },
+          { id: 'ekko-agent', name: 'Ekko', provider: 'Ekko Studio', kind: 'built-in', installed: true, version: '0.7.0', source: 'built-in', path: '', error: '', installations: [] },
           { id: 'claude-code', name: 'Claude', provider: 'Anthropic', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/claude', error: '', installations: [] },
           { id: 'codex', name: 'Codex', provider: 'OpenAI', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/codex', error: '', installations: [] },
           { id: 'pi', name: 'Pi', provider: 'Pi', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/pi', error: '', installations: [] },
@@ -873,6 +878,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
     if (pathname === '/api/studio/versions' && request.method() === 'GET') {
       await route.fulfill(jsonResponse({
         schema: 1,
+        accessMode: 'public_beta',
         hermes: [],
         mobile: {
           version: '1.0.0',
@@ -901,6 +907,11 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     if (pathname === '/api/hermes/jobs') {
       await route.fulfill(jsonResponse({ jobs: [sampleJob] }))
+      return
+    }
+
+    if (pathname === '/api/coding-agents/update-policies' && request.method() === 'GET') {
+      await route.fulfill({ json: { agents: {} } })
       return
     }
 
@@ -971,12 +982,18 @@ export async function mockChatSocket(page: Page) {
       contentType: 'application/javascript',
       body: `
 const state = window.__PW_CHAT_SOCKET__ || (window.__PW_CHAT_SOCKET__ = { sockets: [], emitted: [] })
+state.broadcast = (event, payload) => {
+  for (const socket of [...state.sockets]) {
+    if (socket.connected && socket.rooms.has(payload.session_id)) socket.__trigger(event, payload)
+  }
+}
 function makeSocket(url, options) {
   const listeners = new Map()
   const onceListeners = new Map()
   const socketNumber = (state.socketCount = (state.socketCount || 0) + 1)
   const socket = {
     id: 'pw-socket-' + socketNumber,
+    rooms: new Set(),
     connected: true,
     url,
     options,
@@ -1008,6 +1025,7 @@ function makeSocket(url, options) {
     },
     emit(event, payload, ack) {
       state.emitted.push({ event, payload })
+      if ((event === 'run' || event === 'resume') && payload?.session_id) this.rooms.add(payload.session_id)
       if (typeof ack === 'function' && String(url).endsWith('/workflow')) {
         const data = event === 'workflow.status.subscribe'
           ? { statuses: [] }

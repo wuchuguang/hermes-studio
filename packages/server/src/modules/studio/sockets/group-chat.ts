@@ -1,3 +1,5 @@
+import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
+import { publishGroupMessage, registerGroupEventAccess } from '../services/webhooks/app-events'
 import { Server, Socket, Namespace } from 'socket.io'
 import type { Server as HttpServer } from 'http'
 import { mkdirSync } from 'fs'
@@ -228,7 +230,7 @@ interface RoomAgent {
     id: string
     roomId: string
     agentId: string
-    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok'
+    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode'
     agentMode: 'scoped' | 'global'
     profile: string
     provider: string
@@ -257,7 +259,7 @@ interface GroupAgentActivity {
 }
 
 interface RoomAgentMetadata {
-    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok'
+    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode'
     agentMode?: 'scoped' | 'global'
     provider?: string
     model?: string
@@ -3258,6 +3260,10 @@ export class GroupChatServer {
         })
         servers.slice(1).forEach((httpServer) => this.io.attach(httpServer))
         this.nsp = this.io.of('/group-chat')
+        const removeGroupEventAccess = registerGroupEventAccess({ canReceive: (user, roomId) => this.canSocketObserveRoom({
+            id: '', data: { authUser: user },
+        } as unknown as Socket, roomId) })
+        for (const server of servers) server.once('close', removeGroupEventAccess)
         this.nsp.use(this.authMiddleware.bind(this))
         this.nsp.on('connection', this.onConnection.bind(this))
 
@@ -3320,6 +3326,18 @@ export class GroupChatServer {
         return typeof this.storage.listQueuedExecutionItems === 'function'
             ? this.storage.listQueuedExecutionItems(roomId)
             : []
+    }
+
+    private readonly notifiedGroupMessages = new Set<string>()
+
+    private notifyGroupReply(roomId: string, message: ChatMessage): void {
+        const room = this.storage.getRoom(roomId)
+        if (!room) return
+        // Publish persisted message facts; the App adapter chooses which replies notify.
+        if (this.notifiedGroupMessages.has(message.id)) return
+        this.notifiedGroupMessages.add(message.id)
+        if (this.notifiedGroupMessages.size > 2000) this.notifiedGroupMessages.delete(this.notifiedGroupMessages.values().next().value!)
+        publishGroupMessage(room, message as unknown as Record<string, unknown>, this.storage.getRoomAgents(roomId))
     }
 
     private broadcastExecutionQueue(roomId: string): void {
@@ -3880,6 +3898,7 @@ export class GroupChatServer {
     // ─── Connection ─────────────────────────────────────────────
 
     private onConnection(socket: Socket): void {
+        bindLegacyAppEvents(socket, 'group', event => Boolean(event.subject.room_id && this.canSocketObserveRoom(socket, event.subject.room_id)))
         const auth = socket.handshake.auth as { userId?: string; name?: string; description?: string; source?: string; agentSocketSecret?: string; authUserId?: number }
         const requestedSource = auth.source === 'agent' && auth.agentSocketSecret === GROUP_CHAT_AGENT_SOCKET_SECRET ? 'agent' : 'human'
         const authenticatedUser = socket.data.authUser as AuthenticatedUser | undefined
@@ -4346,6 +4365,7 @@ export class GroupChatServer {
             historyTruncated,
             typingUsers: this.getTypingUsers(roomId),
             contextStatuses: this.getContextStatuses(roomId),
+            roomSummary: this.roomSummaryService.getState(roomId),
             executionQueue: this.executionQueueSnapshot(roomId),
             pendingApprovals: this.pendingApprovalSnapshots(roomId, socket),
             pendingClarifies: this.canSocketManageRoom(socket, roomId) ? this.pendingClarifySnapshots(roomId) : [],
@@ -4608,6 +4628,7 @@ export class GroupChatServer {
         const totalTokens = saved.totalTokens
 
         this.nsp.to(roomId).emit('message', buildOutboundGroupMessage(savedMsg))
+        this.notifyGroupReply(roomId, savedMsg)
         this.nsp.to(roomId).emit('room_updated', { roomId, totalTokens })
         ack?.({ id: savedMsg.id })
 

@@ -90,12 +90,12 @@ describe('coding Agent MCP manager', () => {
     const initial = await listCodingAgentMcpServers('claude-code')
     expect(initial.servers.map(server => server.name)).toEqual(expect.arrayContaining([
       'docs',
-      'hermes-studio-api',
-      'hermes-studio-browser',
-      'hermes-studio-devices',
-      'hermes-studio-use',
+      'ekko-studio-api',
+      'ekko-studio-browser',
+      'ekko-studio-devices',
+      'ekko-studio-use',
     ]))
-    expect(initial.servers.find(server => server.name === 'hermes-studio-api')).toMatchObject({
+    expect(initial.servers.find(server => server.name === 'ekko-studio-api')).toMatchObject({
       managed: true,
       connected: false,
       tools_registered: 0,
@@ -113,7 +113,7 @@ describe('coding Agent MCP manager', () => {
     expect(persisted.mcpServers).toEqual({
       search: { command: 'node', args: ['search.mjs'], enabled: true },
     })
-    expect(persisted.mcpServers['hermes-studio-api']).toBeUndefined()
+    expect(persisted.mcpServers['ekko-studio-api']).toBeUndefined()
   })
 
   it('preserves Pi MCP settings and rejects malformed JSON instead of overwriting it', async () => {
@@ -176,7 +176,95 @@ describe('coding Agent MCP manager', () => {
     expect(persisted).toContain('[mcp_servers.remote-tools]')
     expect(persisted).toContain('[mcp_servers.remote-tools.http_headers]')
     expect(persisted).not.toContain('[mcp_servers."docs.search"]')
-    expect(persisted).not.toContain('[mcp_servers.hermes-studio-api]')
+    expect(persisted).not.toContain('[mcp_servers.ekko-studio-api]')
+  })
+
+  it('manages and probes OpenCode MCP using its native config shape', async () => {
+    const home = makeHome()
+    const path = join(home, '.config', 'opencode', 'opencode.json')
+    mkdirSync(join(home, '.config', 'opencode'), { recursive: true })
+    writeFileSync(path, `${JSON.stringify({
+      theme: 'system',
+      mcp: {
+        docs: {
+          type: 'local',
+          command: ['node', 'docs.mjs'],
+          environment: { DOCS_MODE: 'safe' },
+          enabled: true,
+        },
+      },
+    }, null, 2)}\n`)
+
+    const listed = await listCodingAgentMcpServers('opencode')
+    expect(listed.servers.find(server => server.name === 'docs')?.raw_config).toMatchObject({
+      type: 'stdio',
+      command: 'node',
+      args: ['docs.mjs'],
+      env: { DOCS_MODE: 'safe' },
+    })
+
+    const tested = await testCodingAgentMcpServer('opencode', 'docs')
+    expect(tested).toMatchObject({ ok: true, tools: ['custom_tool'] })
+    expect(stdioOptions.at(-1)).toMatchObject({
+      command: 'node',
+      args: ['docs.mjs'],
+    })
+
+    await upsertCodingAgentMcpServer('opencode', 'search', {
+      command: 'search-mcp',
+      args: ['--stdio'],
+      env: { SEARCH_MODE: 'local' },
+      enabled: true,
+    })
+
+    const persisted = JSON.parse(readFileSync(path, 'utf8'))
+    expect(persisted.theme).toBe('system')
+    expect(persisted.mcp.search).toEqual({
+      type: 'local',
+      command: ['search-mcp', '--stdio'],
+      enabled: true,
+      environment: { SEARCH_MODE: 'local' },
+    })
+    expect(persisted.mcp['ekko-studio-api']).toBeUndefined()
+  })
+
+  it('prunes a manually removed Codex MCP server from persisted scoped runtimes', async () => {
+    const home = makeHome()
+    const globalPath = join(home, '.codex', 'config.toml')
+    const scopedRoot = join(home, 'coding-agent', 'model', 'default', 'openrouter', 'codex')
+    const runPath = join(scopedRoot, 'runs', 'run-1', 'config.toml')
+    mkdirSync(join(home, '.codex'), { recursive: true })
+    mkdirSync(join(scopedRoot, 'runs', 'run-1'), { recursive: true })
+    const globalConfig = [
+      '[mcp_servers.stale]',
+      'url = "https://stale.example/mcp"',
+      '',
+      '[mcp_servers.keep]',
+      'url = "https://keep.example/mcp"',
+      '',
+    ].join('\n')
+    const scopedConfig = [
+      'model = "test-model"',
+      '',
+      '[mcp_servers.stale]',
+      'url = "https://stale.example/mcp"',
+      '',
+      '[mcp_servers.keep]',
+      'url = "https://keep.example/mcp"',
+      '',
+    ].join('\n')
+    writeFileSync(globalPath, globalConfig)
+    writeFileSync(join(scopedRoot, 'config.toml'), scopedConfig)
+    writeFileSync(runPath, scopedConfig)
+
+    await removeCodingAgentMcpServer('codex', 'stale')
+
+    for (const path of [globalPath, join(scopedRoot, 'config.toml'), runPath]) {
+      const persisted = readFileSync(path, 'utf-8')
+      expect(persisted).not.toContain('[mcp_servers.stale]')
+      expect(persisted).toContain('[mcp_servers.keep]')
+    }
+    expect(readFileSync(runPath, 'utf-8')).toContain('model = "test-model"')
   })
 
   it('reads and preserves quoted TOML header keys when an MCP server is edited', async () => {
@@ -242,21 +330,41 @@ describe('coding Agent MCP manager', () => {
       .toEqual(['-y', '@example/docs-mcp'])
   })
 
+  it('migrates persisted managed overrides and allows enabling an old disabled entry', async () => {
+    const home = makeHome()
+    const path = join(home, 'coding-agent', 'mcp-overrides.json')
+    mkdirSync(join(home, 'coding-agent'), { recursive: true })
+    writeFileSync(path, JSON.stringify({
+      disabled: { 'claude-code': { default: ['hermes-studio-api'] } },
+      configs: { 'claude-code': { default: { 'hermes-studio-use': { command: 'custom-use' } } } },
+    }))
+    const listed = await listCodingAgentMcpServers('claude-code')
+    expect(listed.servers.find(server => server.name === 'ekko-studio-api')?.raw_config.enabled).toBe(false)
+    expect(listed.servers.find(server => server.name === 'ekko-studio-use')?.raw_config.command).toBe('custom-use')
+    await upsertCodingAgentMcpServer('claude-code', 'hermes-studio-api', { enabled: true })
+    expect((await listCodingAgentMcpServers('claude-code')).servers
+      .find(server => server.name === 'ekko-studio-api')?.raw_config.enabled).not.toBe(false)
+    const saved = JSON.parse(readFileSync(path, 'utf-8'))
+    expect(saved.disabled).toBeUndefined()
+    expect(saved.configs['claude-code'].default['ekko-studio-use']).toEqual({ command: 'custom-use' })
+    expect(saved.configs['claude-code'].default['hermes-studio-use']).toBeUndefined()
+  })
+
   it('uses per-Agent enable overrides for Studio-managed servers and directly tests custom servers', async () => {
     const home = makeHome()
     expect(existsSync(join(home, '.claude', 'mcp.json'))).toBe(false)
 
     const managed = (await listCodingAgentMcpServers('claude-code')).servers
-      .find(server => server.name === 'hermes-studio-api')!
-    await upsertCodingAgentMcpServer('claude-code', 'hermes-studio-api', {
+      .find(server => server.name === 'ekko-studio-api')!
+    await upsertCodingAgentMcpServer('claude-code', 'ekko-studio-api', {
       ...managed.raw_config,
       enabled: false,
     })
     expect((await listCodingAgentMcpServers('claude-code')).servers
-      .find(server => server.name === 'hermes-studio-api')?.raw_config.enabled).toBe(false)
-    await upsertCodingAgentMcpServer('claude-code', 'hermes-studio-api', { enabled: true })
+      .find(server => server.name === 'ekko-studio-api')?.raw_config.enabled).toBe(false)
+    await upsertCodingAgentMcpServer('claude-code', 'ekko-studio-api', { enabled: true })
     expect((await listCodingAgentMcpServers('claude-code')).servers
-      .find(server => server.name === 'hermes-studio-api')?.raw_config.enabled).not.toBe(false)
+      .find(server => server.name === 'ekko-studio-api')?.raw_config.enabled).not.toBe(false)
     expect(existsSync(join(home, '.claude', 'mcp.json'))).toBe(false)
     expect(JSON.parse(readFileSync(join(home, 'coding-agent', 'mcp-overrides.json'), 'utf-8')).configs)
       .toBeUndefined()
@@ -291,7 +399,7 @@ describe('coding Agent MCP manager', () => {
       return { invalidated: matched.length, deferred: 0 }
     })
 
-    await upsertCodingAgentMcpServer('codex', 'hermes-studio-api', {
+    await upsertCodingAgentMcpServer('codex', 'ekko-studio-api', {
       url: 'https://mcp.example.com/api',
       enabled: true,
     }, { profile: 'default', provider: 'custom:first' })

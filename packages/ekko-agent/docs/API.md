@@ -111,7 +111,7 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `createRuntime(options?)` | `CreateEkkoRuntimeOptions` | `AgentRuntime` | 兼容的安装级 runtime 工厂。 |
 | `close()` | 无 | `void` | 幂等关闭监听、memory 与数据库；Profile Agent 不单独关闭共享资源。 |
 
-持久数据库修复并通过自检后，当前 Setup 仍保持临时内存库直到本轮结束，避免在一次 run 中混用新旧连接。Hermes Studio 会在所有活动 run 与后台任务结束后自动关闭该 Setup，下一次 run 自动重建并连接已修复的持久数据库；故障期间写入临时库的数据不迁移。独立宿主需要在同一边界自行重建 Setup。`restartRequired` 表示“当前 Setup 需要被宿主重载”，在 Studio 中不要求用户手动重启应用。
+持久数据库修复并通过自检后，当前 Setup 仍保持临时内存库直到本轮结束，避免在一次 run 中混用新旧连接。Ekko Studio 会在所有活动 run 与后台任务结束后自动关闭该 Setup，下一次 run 自动重建并连接已修复的持久数据库；故障期间写入临时库的数据不迁移。独立宿主需要在同一边界自行重建 Setup。`restartRequired` 表示“当前 Setup 需要被宿主重载”，在 Studio 中不要求用户手动重启应用。
 
 根容器还保留配置/模型兼容转发方法：`readConfig`、`updateConfig`、`replaceConfig`、`resetConfig`；`list/get/set/update/deleteModelProviderPreset`、`installModelProviderPreset`；`list/get/set/update/deleteModelProvider`、`setDefaultModel`；`list/get/set/update/deleteModelAuthorization`、`modelAuthorizationNeedsRefresh`、`refreshModelAuthorization`、`resolveModelAuthorization`。参数和返回值与下文对应的 `config`、`model`、`authorization` 方法相同。
 
@@ -212,14 +212,14 @@ JavaScript 运行时也会为不与根字段冲突的 Profile 安装直接属性
 | `skillsAvailable?` | 每轮求值的动态 Skill 能力探针；故障修复后同一 runtime 可恢复发现与路由。 |
 | `systemPrompt?`, `runtimeInstructions?` | 系统提示覆盖与固定附加指令。 |
 | `temporaryRuntimeInstructions?` | 每轮重新求值的临时指令 Provider；用于进程诊断，不写入 memory。 |
-| `maxSteps?`, `maxModelRetries?`, `maxConsecutiveToolFailures?` | 主循环、模型重试和连续工具失败上限。 |
+| `maxSteps?`, `maxModelRetries?`, `toolFailureRecoveryThreshold?` | 主循环、模型重试和同一工具连续失败后的模型纠错阈值。`maxConsecutiveToolFailures?` 仅作兼容，不再终止运行。 |
 | `backgroundDelegationEnabled?`, `subtaskMaxSteps?` | 后台委派开关和子任务步数。 |
 | `modelDefaults?` | 除 messages/tools/stream 外的默认模型请求字段。 |
 | `contextKey?` | Runtime 上下文缓存键。 |
 | `memory?` | 自定义 MemoryService；默认使用共享服务并由运行身份限定 Profile。 |
 | `logWriter?`, `logProfile?` | 自定义结构化日志写入器和 Profile 标签。 |
 
-`AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。完整方法签名见文末自动清单。
+`AgentRuntime.run(input)` 的 `input` 字段包括：必填 `messages`；可选 `signal`、`systemPrompt`、`skills`、`maxSteps`、`maxModelRetries`、`toolFailureRecoveryThreshold`、兼容字段 `maxConsecutiveToolFailures`、`toolContext`、`model`、`temperature`、`maxTokens`、`reasoningEffort`、`reasoningSummary`、`metadata`、`modelClient`、`modelDefaults`、`contextKey`、`context`、`memoryEnabled`、`memoryInput`、`backgroundDelegationEnabled`、`logContext`、`onSkillReviewUsage`、`onEvent`。同一工具连续失败达到阈值时，runtime 注入纠错指令并继续运行，不会因该阈值终止。完整方法签名见文末自动清单。
 
 ## Profile `memory` 模块
 
@@ -345,7 +345,8 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 | `schemaVersion` | `number` | 当前为 7；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
-| `runtime.maxConsecutiveToolFailures` | `number` | 连续工具失败终止阈值。 |
+| `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
+| `runtime.maxConsecutiveToolFailures` | `number` | 已弃用的兼容字段，不再终止运行。 |
 | `model.defaultProvider` | `string` | 默认 Provider ID。 |
 | `model.defaultModel` | `string` | 默认模型覆盖。 |
 | `model.requestTimeoutMs` | `number` | 模型 HTTP 超时。 |
@@ -394,7 +395,7 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 
 `EkkoMcpServerConfig` 支持两种传输：stdio 使用 `command`，可选 `args` 和字符串 `env`；远程服务使用 `type: "streamable_http"`、`url` 和可选字符串 `headers`。`enabled` 控制是否加载。两种传输均使用官方 MCP Client；新 runtime 自动读取所选 Profile 的配置，显式 run-level `toolContext.mcpServers` 仍可覆盖它。
 
-`compression` 是供 Host 集成的策略配置，不属于 `AgentRuntime` 内部会话存储。独立 Host 可以读取 `ekko.readConfig().compression` 实现压缩生命周期；Hermes Studio 当前仍统一读取主配置中的压缩策略，暂不应用 Ekko 的该配置段。一次 Run 显式提供的消息和 runtime options 仍优先于安装级默认值。
+`compression` 是供 Host 集成的策略配置，不属于 `AgentRuntime` 内部会话存储。独立 Host 可以读取 `ekko.readConfig().compression` 实现压缩生命周期；Ekko Studio 当前仍统一读取主配置中的压缩策略，暂不应用 Ekko 的该配置段。一次 Run 显式提供的消息和 runtime options 仍优先于安装级默认值。
 
 ## 文档 harness
 
@@ -714,6 +715,8 @@ export const DEFAULT_AGENT_MAX_STEPS = 90
 
 export const DEFAULT_AGENT_MODEL_MAX_RETRIES = 3
 
+export const DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD = 3
+
 export const DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES = 6
 
 export const DEFAULT_AGENT_SUBTASK_MAX_STEPS = 30
@@ -759,6 +762,7 @@ export const DEFAULT_COMPRESSION_PROTECT_FIRST_N = 3
 export interface EkkoRuntimeConfig {
   maxSteps: number
   maxModelRetries: number
+  toolFailureRecoveryThreshold: number
   maxConsecutiveToolFailures: number
 }
 
@@ -907,7 +911,7 @@ export interface EkkoConfig {
 
 export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
 
-export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
+export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
 
 export function serializeDefaultEkkoConfig(): string
 ```
@@ -1377,6 +1381,10 @@ export { OpenAICompatibleModelClient, normalizeOpenAIChatResponse, toOpenAIChatP
 export { OpenAIResponsesModelClient, normalizeOpenAIResponsesResponse, toOpenAIResponsesPayload, } from './model/providers/openai-responses'
 
 export { PromptCompletionModelClient, normalizePromptCompletionResponse, toPromptCompletionPayload, } from './model/providers/prompt-completion'
+
+export { UpdatePlanTool } from './tools/plan'
+
+export type { AgentPlanStep, AgentPlanUpdate, AgentTaskPlan } from './tools/plan'
 ```
 ### `src/logging/file-logger.ts`
 
@@ -2518,7 +2526,7 @@ export class EkkoRecoveryService {
 ### `src/runtime/events.ts`
 
 ```ts
-export type AgentRuntimeEvent = | { type: 'run.started'; runId: string; maxSteps: number } | { type: 'memory.retrieved'; runId: string; diagnostics: MemoryContextDiagnostics; memoryIds: string[] } | { type: 'skill.review.started'; runId: string; reviewId: string } | { type: 'skill.review.completed'; runId: string; reviewId: string; mutations: number } | { type: 'skill.review.failed'; runId: string; reviewId: string; error: string } | { type: 'model.started'; runId: string; step: number } | { type: 'context.estimated'; runId: string; step: number; estimate: AgentRuntimeContextEstimate } | { type: 'model.retry'; runId: string; step: number; retry: number; maxRetries: number; error: string } | { type: 'model.message'; runId: string; step: number; message: AgentOutputMessage } | { type: 'model.delta'; runId: string; step: number; text: string } | { type: 'model.reasoning'; runId: string; step: number; text: string } | { type: 'model.tool_call'; runId: string; step: number; toolCall: AgentToolCall } | { type: 'model.usage'; runId: string; step: number; usage: ModelUsage } | { type: 'model.context'; runId: string; step: number; context: unknown } | { type: 'tool.started'; runId: string; step: number; toolCallId: string; toolName: string; arguments: Record<string, unknown> } | { type: 'tool.completed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'tool.failed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'subagent.start'; runId: string; subagentId: string; goal: string; background: boolean; model?: string; startedAt: number } | { type: 'subagent.text'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.thinking'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.tool'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; toolName: string; arguments: Record<string, unknown>; toolCount: number } | { type: 'subagent.complete' runId: string childRunId?: string subagentId: string goal: string background: boolean status: 'completed' | 'failed' | 'interrupted' summary: string output: string outputTail: string durationMs: number toolCount: number apiCalls: number inputTokens: number outputTokens: number cacheReadTokens: number cacheWriteTokens: number reasoningTokens: number continuationContext?: EkkoBackgroundContinuationContext } | { type: 'run.tool_failure_limit'; runId: string; failures: number } | { type: 'run.completed'; runId: string; output: AgentOutputMessage; steps: number; context?: unknown; contextEstimate?: AgentRuntimeContextEstimate } | { type: 'run.failed'; runId: string; error: string; steps: number } | { type: 'run.max_steps'; runId: string; maxSteps: number }
+export type AgentRuntimeEvent = | { type: 'plan.updated'; runId: string; plan: import('../tools/plan').AgentTaskPlan } | { type: 'run.started'; runId: string; maxSteps: number } | { type: 'memory.retrieved'; runId: string; diagnostics: MemoryContextDiagnostics; memoryIds: string[] } | { type: 'skill.review.started'; runId: string; reviewId: string } | { type: 'skill.review.completed'; runId: string; reviewId: string; mutations: number } | { type: 'skill.review.failed'; runId: string; reviewId: string; error: string } | { type: 'model.started'; runId: string; step: number } | { type: 'context.estimated'; runId: string; step: number; estimate: AgentRuntimeContextEstimate } | { type: 'model.retry'; runId: string; step: number; retry: number; maxRetries: number; error: string } | { type: 'model.message'; runId: string; step: number; message: AgentOutputMessage } | { type: 'model.delta'; runId: string; step: number; text: string } | { type: 'model.reasoning'; runId: string; step: number; text: string } | { type: 'model.tool_call'; runId: string; step: number; toolCall: AgentToolCall } | { type: 'model.usage'; runId: string; step: number; usage: ModelUsage } | { type: 'model.context'; runId: string; step: number; context: unknown } | { type: 'tool.started'; runId: string; step: number; toolCallId: string; toolName: string; arguments: Record<string, unknown> } | { type: 'tool.completed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'tool.failed'; runId: string; step: number; toolCallId: string; toolName: string; result: AgentToolResult; durationMs: number } | { type: 'subagent.start'; runId: string; subagentId: string; goal: string; background: boolean; model?: string; startedAt: number } | { type: 'subagent.text'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.thinking'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; text: string } | { type: 'subagent.tool'; runId: string; childRunId?: string; subagentId: string; goal: string; background: boolean; toolName: string; arguments: Record<string, unknown>; toolCount: number } | { type: 'subagent.complete' runId: string childRunId?: string subagentId: string goal: string background: boolean status: 'completed' | 'failed' | 'interrupted' summary: string output: string outputTail: string durationMs: number toolCount: number apiCalls: number inputTokens: number outputTokens: number cacheReadTokens: number cacheWriteTokens: number reasoningTokens: number continuationContext?: EkkoBackgroundContinuationContext } | { type: 'run.tool_recovery_required'; runId: string; toolName: string; failures: number } | { type: 'run.completed'; runId: string; output: AgentOutputMessage; steps: number; context?: unknown; contextEstimate?: AgentRuntimeContextEstimate } | { type: 'run.failed'; runId: string; error: string; steps: number } | { type: 'run.max_steps'; runId: string; maxSteps: number }
 ```
 ### `src/runtime/manager.ts`
 
@@ -2556,6 +2564,7 @@ export interface SystemPromptInput {
   runtimeInstructions?: string[]
   userSystemMessages?: string[]
   memoryContext?: string
+  planningEnabled?: boolean
   clarificationEnabled?: boolean
   skillDiscoveryEnabled?: boolean
   skillManagementEnabled?: boolean
@@ -2625,6 +2634,7 @@ export interface AgentRuntimeOptions {
   recoveryDirective?: () => AgentRuntimeRecoveryDirective
   maxSteps?: number
   maxModelRetries?: number
+  toolFailureRecoveryThreshold?: number
   maxConsecutiveToolFailures?: number
   backgroundDelegationEnabled?: boolean
   subtaskMaxSteps?: number
@@ -2643,6 +2653,7 @@ export interface AgentRuntimeRunInput {
   skills?: AgentSkill[]
   maxSteps?: number
   maxModelRetries?: number
+  toolFailureRecoveryThreshold?: number
   maxConsecutiveToolFailures?: number
   toolContext?: AgentToolContext
   model?: string
@@ -2662,6 +2673,7 @@ export interface AgentRuntimeRunInput {
   backgroundDelegationEnabled?: boolean
   logContext?: EkkoRuntimeLogContext
   onSkillReviewUsage?: (input: SkillReviewUsageEvent) => void
+  onPlanUpdate?: (plan: import('../tools/plan').AgentTaskPlan) => void
   onEvent?: (event: AgentRuntimeEvent) => void
 }
 
@@ -3092,6 +3104,42 @@ export function resolveUnrestrictedToolPath( inputPath: string, context: { cwd?:
 
 export function resolveToolPath(inputPath: string, context: { cwd?: string; workspaceRoot?: string } = {}): string
 ```
+### `src/tools/plan.ts`
+
+```ts
+export interface AgentPlanStep {
+  id: string
+  step: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+export interface AgentPlanUpdate {
+  explanation?: string
+  plan: AgentPlanStep[]
+}
+
+export interface AgentTaskPlan extends AgentPlanUpdate {
+  runId: string
+  planId: string
+  revision: number
+  executionState: 'running' | 'ended' | 'interrupted' | 'failed'
+  createdAt: number
+  updatedAt: number
+}
+
+export function parsePlanUpdate(input: Record<string, unknown>): AgentPlanUpdate
+
+export class RunTaskPlan {
+  constructor(private runId: string, private commit: (plan: AgentTaskPlan) => void)
+  update(update: AgentPlanUpdate): AgentTaskPlan
+  finish(state: Exclude<AgentTaskPlan['executionState'], 'running'>): void
+}
+
+export class UpdatePlanTool implements AgentTool {
+  readonly definition = { name: 'update_plan', description: 'Create or update the task plan for this run. Send the complete ordered list on every update. Keep step IDs stable. Mark a step completed only after its work is verified. Use for multi-step tasks; skip simple questions.', parameters: { type: 'object', properties: { explanation: { type: 'string', maxLength: 1000, description: 'Brief reason for the update or scope change.' }, plan: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'object', properties: { id: { type: 'string', minLength: 1, maxLength: 100 }, step: { type: 'string', minLength: 1, maxLength: 200 }, status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] }, }, required: ['id', 'step', 'status'], additionalProperties: false, }, }, }, required: ['plan'], additionalProperties: false, }, }
+  async execute(input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult>
+}
+```
 ### `src/tools/recovery.ts`
 
 ```ts
@@ -3303,6 +3351,7 @@ export interface AgentToolAuthorizationDecision {
 export type AgentToolAuthorizer = ( toolName: string, input: Record<string, unknown>, context?: AgentToolContext, ) => Promise<AgentToolAuthorizationDecision>
 
 export interface AgentToolContext {
+  updatePlan?: (update: import('./plan').AgentPlanUpdate) => import('./plan').AgentTaskPlan
   runId?: string
   cwd?: string
   workspaceRoot?: string

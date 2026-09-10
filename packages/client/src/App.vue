@@ -23,6 +23,7 @@ import { useSessionSearch } from "@/composables/useSessionSearch";
 import { watchServerTtsSettingsHydration } from "@/composables/useTtsSettingsHydration";
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
+import { isStoredSuperAdmin } from "@/api/client";
 import AuthEventListener from "@/components/auth/AuthEventListener.vue";
 import { desktopBridge } from "@/utils/desktop-bridge";
 import { naiveLocaleFor } from "@/constants/naiveLocale";
@@ -69,6 +70,9 @@ const GlobalPendingActions = defineAsyncComponent(
 const RuntimeRestartPrompt = defineAsyncComponent(
   async () =>
     (await import("@/components/layout/RuntimeRestartPrompt.vue")).default,
+);
+const StudioAnnouncementPrompt = defineAsyncComponent(
+  async () => (await import('@/components/layout/StudioAnnouncementPrompt.vue')).default,
 );
 
 const {
@@ -341,7 +345,10 @@ useKeyboard();
             v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage"
           />
           <RuntimeRestartPrompt
-            v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage"
+            v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage && isStoredSuperAdmin()"
+          />
+          <StudioAnnouncementPrompt
+            v-if="!isLoginPage && !isInviteOnlyPage && !isDesktopPetRoute && !isStandaloneChatPage"
           />
         </NNotificationProvider>
       </NDialogProvider>

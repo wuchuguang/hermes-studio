@@ -156,6 +156,7 @@ const agentDisplayName = computed(() => {
     'claude-code': 'Claude',
     codex: 'Codex',
     grok: 'Grok',
+    opencode: 'OpenCode',
     'ekko-agent': 'Ekko',
   }[agent] || agent
 })
@@ -336,6 +337,7 @@ function currentSynthesisRequest(text: string, signal: AbortSignal) {
         model: voiceSettings.doubaoModel.value,
         voice: voiceSettings.doubaoVoice.value,
         stylePrompt: voiceSettings.doubaoStylePrompt.value || undefined,
+        speed: voiceSettings.doubaoSpeed.value || undefined,
       },
     })
   }

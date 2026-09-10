@@ -19,8 +19,8 @@ const packageJson = JSON.parse(readFileSync(join(rootDir, 'package.json'), 'utf-
 const openapi = {
   openapi: '3.0.3',
   info: {
-    title: 'Hermes Studio API',
-    description: 'Hermes Studio API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.',
+    title: 'Ekko Studio API',
+    description: 'Ekko Studio API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.',
     version: packageJson.version,
   },
   servers: [
@@ -96,6 +96,7 @@ const tagMappings = {
   'modules/studio/routes/mcu-devices.ts': { name: 'MCU Devices', description: 'Microcontroller device management' },
   'modules/studio/routes/mcu-firmware.ts': { name: 'MCU Firmware', description: 'Microcontroller firmware distribution' },
   'modules/studio/routes/theme.ts': { name: 'Theme', description: 'Per-user appearance settings and background image' },
+  'modules/studio/routes/announcements.ts': { name: 'Announcements', description: 'Published Studio desktop announcements, newest first' },
   'modules/studio/routes/api-docs.ts': { name: 'API Docs', description: 'OpenAPI route catalog' },
   'modules/studio/routes/agent-status.ts': { name: 'Agent Status', description: 'In-memory Agent installation, version, and source status' },
   'modules/coding-agents/routes/agents.ts': { name: 'Coding Agents', description: 'Coding agent installation, config, and runs' },
@@ -318,6 +319,36 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
   }
 
   const parameters = generateParameters(openapiPath, controllerSource)
+  if (openapiPath === '/api/studio/sessions' && method === 'get') {
+    operation.responses['200'] = {
+      description: 'Session list. Supplying offset also returns pagination metadata and the total matching the same visibility, category, and include/exclude filters before pagination.',
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object', required: ['sessions'],
+            properties: {
+              sessions: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              total: { type: 'integer', minimum: 0, description: 'Total matching sessions, independent of offset and limit. Present when offset is supplied.' },
+              hasMore: { type: 'boolean' },
+              offset: { type: 'integer', minimum: 0 },
+              limit: { type: 'integer', minimum: 1 },
+            },
+          },
+        },
+      },
+    }
+    for (const parameter of parameters) {
+      if (parameter.name === 'category') {
+        parameter.schema = { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'string', enum: ['none'] }] }
+        parameter.description = 'Filter by category ID; none selects uncategorized sessions.'
+      } else if (parameter.name === 'include' || parameter.name === 'exclude') {
+        parameter.schema = { type: 'array', items: { type: 'string' } }
+        parameter.style = 'form'
+        parameter.explode = true
+        parameter.description = 'Repeat this parameter for each session ID.'
+      }
+    }
+  }
   if (parameters.length) operation.parameters = parameters
 
   const requestBody = generateRequestBody(method, controllerSource)
@@ -883,7 +914,7 @@ openapi.paths['/api/studio/chat-run/runs'] = {
   post: {
     tags: ['Chat Run'],
     summary: 'Run chat and wait for completion',
-    description: 'Starts a Hermes Studio chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.',
+    description: 'Starts a Ekko Studio chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.',
     operationId: 'runChatOnce',
     security: [{ BearerAuth: [] }],
     requestBody: {
@@ -913,7 +944,7 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               },
               profile: {
                 type: 'string',
-                description: 'Hermes Studio profile name. Defaults to the authenticated request profile or default.',
+                description: 'Ekko Studio profile name. Defaults to the authenticated request profile or default.',
               },
               provider: {
                 type: 'string',
@@ -960,12 +991,12 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               },
               coding_agent_id: {
                 type: 'string',
-                enum: ['claude-code', 'codex'],
+                enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
                 description: 'Coding agent id when source is coding_agent.',
               },
               agent_id: {
                 type: 'string',
-                enum: ['claude-code', 'codex'],
+                enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
                 description: 'Alias for coding_agent_id.',
               },
               mode: {
@@ -1029,6 +1060,46 @@ openapi.paths['/api/studio/chat-run/runs'] = {
       '409': { description: 'Run requires approval or clarification' },
       '500': { description: 'Run failed' },
       '504': { description: 'Run timed out' },
+    },
+  },
+}
+
+openapi.paths['/api/studio/mobile-calendar/request'] = {
+  post: {
+    tags: ['Chat Run'],
+    summary: 'Request one-time mobile calendar or reminder access',
+    description: 'Requests a user-confirmed calendar/reminder operation from the App for the exact authenticated direct-chat session. Single-item delete requires exact id, title and occurrence time with fresh App confirmation. Background, workflow, group-chat, and delegated use are not supported.',
+    operationId: 'requestMobileCalendar',
+    security: [{ BearerAuth: [] }],
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['session_id', 'capability', 'action', 'purpose'],
+            properties: {
+              session_id: { type: 'string' },
+              capability: { type: 'string', enum: ['calendar', 'reminder'] },
+              action: { type: 'string', enum: ['list', 'create', 'update', 'complete', 'delete'] },
+              purpose: { type: 'string', maxLength: 240 },
+              start_ms: { type: 'number' },
+              end_ms: { type: 'number' },
+              include_completed: { type: 'boolean' },
+              limit: { type: 'integer', minimum: 1, maximum: 100 },
+              item: { type: 'object', additionalProperties: true },
+              timeout_ms: { type: 'integer', minimum: 3000, maximum: 300000, default: 300000 },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      '200': { description: 'Confirmed App result, denial, or sanitized device error' },
+      '400': { $ref: '#/components/responses/BadRequest' },
+      '401': { $ref: '#/components/responses/Unauthorized' },
+      '404': { $ref: '#/components/responses/NotFound' },
+      '503': { description: 'Chat run service unavailable' },
     },
   },
 }
