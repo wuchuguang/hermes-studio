@@ -183,6 +183,35 @@ function applyModelVisibility(groups: AvailableGroup[], visibility: ModelVisibil
     .filter(group => group.models.length > 0 || group.provider === OPENCODE_FREE_PROVIDER)
 }
 
+// fork 定制：只显示 DeepSeek 与智谱 GLM 5.3 / GLM 5.3 Flash。
+// 环境变量 HERMES_STUDIO_PROVIDER_ALLOWLIST 为空时不过滤（其它部署不受影响）。
+// 格式: "deepseek,glm:glm-5.3,glm:glm-5.3-flash" — provider 单独出现=整组显示，带 :model=只显示指定模型。
+const PROVIDER_ALLOWLIST_ENV = 'HERMES_STUDIO_PROVIDER_ALLOWLIST'
+function applyProviderAllowlist(groups: AvailableGroup[]): AvailableGroup[] {
+  const raw = process.env[PROVIDER_ALLOWLIST_ENV]
+  if (!raw || !raw.trim()) return groups
+  const entries = raw.split(',').map(s => s.trim()).filter(Boolean)
+  const allowedProviders = new Set(entries.filter(e => !e.includes(':')))
+  const allowedModelsByProvider = new Map<string, Set<string>>()
+  for (const e of entries) {
+    const sep = e.indexOf(':')
+    if (sep <= 0) continue
+    const provider = e.slice(0, sep)
+    if (!allowedModelsByProvider.has(provider)) allowedModelsByProvider.set(provider, new Set())
+    allowedModelsByProvider.get(provider)!.add(e.slice(sep + 1))
+  }
+  return groups
+    .filter(group => allowedProviders.has(group.provider) || allowedModelsByProvider.has(group.provider))
+    .map(group => {
+      const models = allowedModelsByProvider.get(group.provider)
+      if (!models) return group
+      const visible = group.models.filter(m => models.has(m))
+      if (visible.length === 0) return null
+      return { ...group, models: visible, available_models: (group.available_models || group.models).filter(m => models.has(m)) }
+    })
+    .filter((g): g is AvailableGroup => g !== null)
+}
+
 function resolveVisibleDefault(defaultModel: string, defaultProvider: string, groups: AvailableGroup[]) {
   if (defaultModel) {
     const explicit = groups.find(group => group.provider === defaultProvider && group.models.includes(defaultModel))
@@ -581,7 +610,7 @@ export async function getAvailableModelGroupsForProfile(profile: string): Promis
   const modelVisibility = normalizeModelVisibility(appConfig.modelVisibility)
   const modelCatalogCache = await readProviderModelCatalogCache()
   const result = await buildAvailableForProfile(profile || 'default', modelCatalogCache, appConfig)
-  return applyModelVisibility(result.groups, modelVisibility)
+  return applyProviderAllowlist(applyModelVisibility(result.groups, modelVisibility))
 }
 
 export async function getAvailable(ctx: any) {
@@ -599,7 +628,7 @@ export async function getAvailable(ctx: any) {
       )
       const mergedGroups = mergeAvailableGroups(profileResults.flatMap(result => result.groups))
       const groupsWithAliases = applyModelAliases(mergedGroups, modelAliases)
-      const visibleGroups = applyModelVisibility(groupsWithAliases, modelVisibility)
+      const visibleGroups = applyProviderAllowlist(applyModelVisibility(groupsWithAliases, modelVisibility))
       const activeProfile = requestScopedProfileName(ctx)
       const defaultProfile = profileResults.find(result => result.profile === activeProfile && (result.default || result.default_provider))
         || profileResults.find(result => result.default && result.default_provider)
@@ -628,7 +657,7 @@ export async function getAvailable(ctx: any) {
           profile: result.profile,
           default: result.default,
           default_provider: result.default_provider,
-          groups: applyModelVisibility(applyModelAliases(result.groups, modelAliases), modelVisibility),
+          groups: applyProviderAllowlist(applyModelVisibility(applyModelAliases(result.groups, modelAliases), modelVisibility)),
         })),
       }
       return
@@ -641,7 +670,7 @@ export async function getAvailable(ctx: any) {
     const modelCatalogCacheForProfile = await readProviderModelCatalogCache()
     const profileResult = await buildAvailableForProfile(requestedProfile, modelCatalogCacheForProfile, appConfigForProfile)
     const profileGroupsWithAliases = applyModelAliases(profileResult.groups, modelAliasesForProfile)
-    const visibleProfileGroups = applyModelVisibility(profileGroupsWithAliases, modelVisibilityForProfile)
+    const visibleProfileGroups = applyProviderAllowlist(applyModelVisibility(profileGroupsWithAliases, modelVisibilityForProfile))
     const visibleProfileDefault = resolveVisibleDefault(profileResult.default, profileResult.default_provider, visibleProfileGroups)
     ctx.body = {
       default: visibleProfileDefault.defaultModel,
