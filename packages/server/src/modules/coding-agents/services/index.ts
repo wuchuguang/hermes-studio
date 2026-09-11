@@ -19,6 +19,7 @@ import { PROVIDER_PRESETS } from '../../studio/contracts/providers'
 import { getModelContextLength, getModelRuntimeCapabilities } from '../../studio/public/provider-runtime'
 import { getSystemPrompt } from '../../studio/public/runs/prompt'
 import { codingAgentRunManager } from './runtime/run-manager'
+import { mergePiSettings, userSettingsProvidesPiMcpAdapter } from './pi/settings'
 import { PI_EXTENDED_THINKING_LEVEL_MAP, piModelSupportsThinking } from './pi/thinking'
 import { GROK_API_KEY_ENV, GROK_CODING_AGENT_DEFINITION, GROK_PROVIDER_ID } from './grok/definition'
 import { getDisabledManagedMcpServers, getManagedMcpServerOverride } from './mcp-overrides'
@@ -56,10 +57,7 @@ const CLAUDE_CODE_ROOT_PERMISSION_ARGS = ['--permission-mode', 'auto']
 // model context window, so it can compact too late for the 20MB proxy body
 // limit. Mirror Hermes' 50% compression budget and pass Studio's window.
 const CLAUDE_CODE_AUTO_COMPACT_PERCENT = 50
-const PI_MCP_ADAPTER_VERSION = '2.24.0'
-const PI_MCP_ADAPTER_PACKAGE = `pi-mcp-adapter@${PI_MCP_ADAPTER_VERSION}`
-const PI_CODING_AGENT_VERSION = '0.84.1'
-const PI_CODING_AGENT_PACKAGE = `@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}`
+const PI_MCP_ADAPTER_PACKAGE = 'pi-mcp-adapter'
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org'
 const PI_PROVIDER_ID = 'hermes-studio'
 const PI_PROXY_TARGET_FILE = 'proxy-target.json'
@@ -1516,26 +1514,50 @@ function getPiMcpAdapterEntry(): string {
   return join(getPiMcpAdapterRoot(), 'node_modules', 'pi-mcp-adapter', 'index.ts')
 }
 
-function piSettingsConfig(existingContents: string[] = [], runtimeExtensionPath = ''): string {
-  let existing: Record<string, unknown> = {}
-  for (const content of existingContents) {
-    try {
-      const parsed = JSON.parse(content)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = { ...existing, ...parsed }
-    } catch {}
+const piAdapterInstalls = new Map<string, Promise<void>>()
+
+async function installBundledPiMcpAdapter(): Promise<void> {
+  const root = getPiMcpAdapterRoot()
+  const pending = piAdapterInstalls.get(root)
+  if (pending) return pending
+  const installation = (async () => {
+    const env = await commandEnv()
+    await mkdir(root, { recursive: true })
+    await runNpm(piMcpAdapterInstallArgs(root), { timeout: 10 * 60 * 1000, env })
+  })()
+  piAdapterInstalls.set(root, installation)
+  try {
+    await installation
+  } finally {
+    piAdapterInstalls.delete(root)
   }
+}
+
+async function readPiSettings(scope?: Required<CodingAgentConfigScope>): Promise<Record<string, unknown>> {
+  const definitions = [
+    getLiveConfigFileDefinition('pi', 'settings'),
+    ...(scope ? [getScopedConfigFileDefinition('pi', 'settings', scope)] : []),
+  ].filter((definition): definition is NonNullable<typeof definition> => Boolean(definition))
+  const sources = await Promise.all(definitions.map(async definition => ({
+    content: (await safeReadFile(definition.absolutePath)) || '',
+    baseDir: dirname(definition.absolutePath),
+  })))
+  return mergePiSettings(sources, getPiMcpAdapterEntry())
+}
+
+function piSettingsConfig(existing: Record<string, unknown> = {}, runtimeExtensionPath = ''): string {
+  const bundledAdapterEntry = getPiMcpAdapterEntry()
   const configuredExtensions = Array.isArray(existing.extensions)
-    ? existing.extensions.filter(value => typeof value === 'string' && value.trim())
+    ? existing.extensions.filter(value => typeof value === 'string' && value.trim() && value !== bundledAdapterEntry)
     : []
+  const extensions = new Set<string>(configuredExtensions)
+  if (!userSettingsProvidesPiMcpAdapter({ ...existing, extensions: configuredExtensions })) extensions.add(bundledAdapterEntry)
+  if (runtimeExtensionPath) extensions.add(runtimeExtensionPath)
   return `${JSON.stringify({
     ...existing,
     defaultProjectTrust: 'never',
     enableSkillCommands: true,
-    extensions: [...new Set([
-      ...configuredExtensions,
-      getPiMcpAdapterEntry(),
-      ...(runtimeExtensionPath ? [runtimeExtensionPath] : []),
-    ])],
+    extensions: [...extensions],
   }, null, 2)}\n`
 }
 
@@ -2708,6 +2730,10 @@ export function withCodingAgentRegistry(id: CodingAgentId, args: string[]): stri
     : [...args]
 }
 
+export function piMcpAdapterInstallArgs(adapterRoot: string): string[] {
+  return ['install', '--prefix', adapterRoot, PI_MCP_ADAPTER_PACKAGE]
+}
+
 export function getCodingAgentConfigFileDefinitions(id: string): CodingAgentConfigFileDefinition[] {
   const tool = getCodingAgentDefinition(id)
   if (!tool) return []
@@ -2734,17 +2760,20 @@ export async function getCodingAgentStatus(definition: CodingAgentDefinition): P
     })
     const rawVersion = `${stdout || ''}${stderr || ''}`.trim()
     if (definition.id === 'pi' && !existsSync(getPiMcpAdapterEntry())) {
-      const status: CodingAgentToolStatus = {
-        ...definition,
-        installed: false,
-        version: extractVersion(rawVersion),
-        rawVersion,
-        source: 'user-cli',
-        path: resolvedCommand,
-        error: `Pi MCP Adapter ${PI_MCP_ADAPTER_VERSION} is not installed`,
+      const userProvidesAdapter = userSettingsProvidesPiMcpAdapter(await readPiSettings())
+      if (!userProvidesAdapter) {
+        const status: CodingAgentToolStatus = {
+          ...definition,
+          installed: false,
+          version: extractVersion(rawVersion),
+          rawVersion,
+          source: 'user-cli',
+          path: resolvedCommand,
+          error: 'Pi MCP Adapter is not installed',
+        }
+        recordCodingAgentStatus(status)
+        return status
       }
-      recordCodingAgentStatus(status)
-      return status
     }
     const status: CodingAgentToolStatus = {
       ...definition,
@@ -2846,12 +2875,6 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
     throw err
   }
   try {
-    if (tool.id === 'pi') {
-      const status = await getCodingAgentStatus(tool)
-      const latestVersion = PI_CODING_AGENT_VERSION
-      const updateAvailable = status.installed && !versionGte(status.version, latestVersion)
-      return { success: true, tool: status, latestVersion, updateAvailable }
-    }
     const env = await commandEnv()
     const { stdout } = await runNpm(
       withCodingAgentRegistry(tool.id, ['view', tool.packageName, 'version']),
@@ -2885,18 +2908,13 @@ export async function installCodingAgent(id: string): Promise<CodingAgentMutatio
     const env = await commandEnv()
     await runNpm(withCodingAgentRegistry(
       tool.id,
-      ['install', '-g', tool.id === 'pi' ? PI_CODING_AGENT_PACKAGE : tool.packageName],
+      ['install', '-g', tool.packageName],
     ), {
       timeout: 10 * 60 * 1000,
       env,
     })
-    if (tool.id === 'pi') {
-      const adapterRoot = getPiMcpAdapterRoot()
-      await mkdir(adapterRoot, { recursive: true })
-      await runNpm(['install', '--prefix', adapterRoot, '--save-exact', PI_MCP_ADAPTER_PACKAGE], {
-        timeout: 10 * 60 * 1000,
-        env,
-      })
+    if (tool.id === 'pi' && !userSettingsProvidesPiMcpAdapter(await readPiSettings())) {
+      await installBundledPiMcpAdapter()
     }
     cachedGlobalNpmBin = undefined
     const status = await getCodingAgentStatus(tool)
@@ -3473,10 +3491,10 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       ...(reasoningEffort ? ['-c', `model_reasoning_effort=${JSON.stringify(reasoningEffort)}`] : []),
     ]
   } else if (tool.id === 'pi') {
-    if (!existsSync(getPiMcpAdapterEntry())) {
-      const err = new Error(`Pi MCP Adapter ${PI_MCP_ADAPTER_VERSION} is not installed. Reinstall Pi from Coding Agents.`)
-      ;(err as any).status = 400
-      throw err
+    const settings = await readPiSettings(scope)
+    const skipBundledAdapter = userSettingsProvidesPiMcpAdapter(settings)
+    if (!skipBundledAdapter && !existsSync(getPiMcpAdapterEntry())) {
+      await installBundledPiMcpAdapter()
     }
     // Keep a stable, credential-free Pi config set at the same level as the
     // Claude Code and Codex homes. Each conversation still gets an isolated
@@ -3504,10 +3522,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     await mkdir(sessionsDir, { recursive: true })
     await writeRuntimeFile('studio_extension', PI_STUDIO_EXTENSION_FILE, piStudioRuntimeExtension())
     await writeRuntimeFile('dynamic_prompt', PI_DYNAMIC_PROMPT_FILE, '')
-    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig([
-      (await safeReadFile(getLiveConfigFileDefinition(tool.id, 'settings')?.absolutePath || '')) || '',
-      (await safeReadFile(getScopedConfigFileDefinition(tool.id, 'settings', scope)?.absolutePath || '')) || '',
-    ], studioExtensionPath))
+    await writeRuntimeFile('settings', 'settings.json', piSettingsConfig(settings, studioExtensionPath))
     await writeRuntimeFile('models', 'models.json', piModelsConfig({
       baseUrl: piBaseUrl,
       apiKey: piApiKey,
@@ -3574,7 +3589,12 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
           chatSessionId: isolatedInput.sessionId,
         })
       : null
-    const capabilities = getModelRuntimeCapabilities({ profile: scope.profile, provider, model })
+    const capabilities = getModelRuntimeCapabilities({
+      profile: scope.profile,
+      provider,
+      model,
+      ...(provider === 'custom' || provider.startsWith('custom:') ? { fallbackContextLength: 128_000 } : {}),
+    })
     const baseConfigRoot = getScopedConfigRoot(tool.id, scope)
     const globalGrokHome = process.env.GROK_HOME?.trim() || join(getGlobalConfigHome(), '.grok')
     const globalInstructions = await safeReadFile(join(globalGrokHome, 'AGENTS.md')) || ''

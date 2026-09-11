@@ -14,6 +14,7 @@ import {
   listHermesSessionSummaryGroups,
   notifyHermesSessionModelChanged,
   stopCodingAgentSessionRun,
+  invalidateCodingAgentSessionRuntime,
 } from '../public/session-agent-runtime'
 import {
   listSessions as localListSessions,
@@ -1662,6 +1663,7 @@ export async function setReasoningEffort(ctx: any) {
   }
 
   localUpdateSession(id, { reasoning_effort: reasoningEffort })
+  if (existing.agent === 'grok') invalidateCodingAgentSessionRuntime(id)
   getChatRunServer()?.emitSessionSettingsUpdated(id, {
     reasoning_effort: reasoningEffort,
   })

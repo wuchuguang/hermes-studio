@@ -45,4 +45,7 @@ configureSessionAgentRuntime({
     )
   },
   stopCodingAgentSessionRun: (sessionId, options) => codingAgentRunManager.stop(sessionId, options),
+  invalidateCodingAgentSessionRuntime: (sessionId, agentId = 'grok') => codingAgentRunManager.invalidateMatching(
+    launch => launch.sessionId === sessionId && launch.agentId === agentId,
+  ),
 })
