@@ -77,10 +77,11 @@ body { -webkit-tap-highlight-color: transparent; }
   .sidebar-logo { padding-left: 16px !important; }
 }
 
-/* 键盘弹出时避免整体顶起 (keyboard-open 类由 boot.js 打) */
-@supports (height: 100dvh) {
-  html.keyboard-open .app-layout { height: 100dvh; }
-}
+/* 键盘弹出: boot.js 已把 --vh 缩到 visualViewport 高度, app-shell(calc(100*var(--vh)))
+   随之收缩, app-layout 靠 flex:1 自适应即可。
+   注意: 不要在这里写 height:100dvh/100vh —— iOS 键盘弹出时 dvh 不变, 会把 app-layout
+   撑回全屏高, 溢出 app-shell 的 overflow:hidden, 底部输入区整块被裁掉(iPhone 输入
+   看不到内容的原因)。 */
 
 /* PWA standalone 全屏模式增强 */
 @media (max-width: 768px) and (display-mode: standalone) {

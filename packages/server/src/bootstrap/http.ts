@@ -1,5 +1,6 @@
 import Koa from 'koa'
 import type { Context } from 'koa'
+import type { ServerResponse } from 'http'
 import cors from '@koa/cors'
 import serve from 'koa-static'
 import send from 'koa-send'
@@ -513,19 +514,38 @@ export async function bootstrap() {
 
   // SPA fallback
   const distDir = resolve(__dirname, '..', 'client')
+
+  // Strong ETag (size+mtime) so revalidations of no-cache entries (index.html,
+  // boot.js, sw.js) cost one 304 round trip instead of a full re-download.
+  const setStaticHeaders = (res: ServerResponse, filePath: string, stats: { size: number, mtimeMs: number }) => {
+    const cacheControl = getStaticCacheControl(relative(distDir, filePath))
+    if (cacheControl) res.setHeader('Cache-Control', cacheControl)
+    res.setHeader('ETag', `"${stats.size.toString(16)}-${stats.mtimeMs.toString(16)}"`)
+  }
+
+  // Conditional GET for any response that carries our ETag. Must be registered
+  // before serve/send so it runs after them (koa-send resets ctx.status to 200
+  // when assigning the body stream, so the 304 can only be set downstream).
+  app.use(async (ctx, next) => {
+    await next()
+    if (ctx.status !== 200 || (ctx.method !== 'GET' && ctx.method !== 'HEAD')) return
+    const etag = ctx.response.get('ETag')
+    if (etag && ctx.get('If-None-Match') === etag) {
+      ctx.status = 304
+      ctx.body = null
+    }
+  })
+
   app.use(createStaticCompressionMiddleware())
   app.use(serve(distDir, {
-    setHeaders(res, filePath) {
-      const cacheControl = getStaticCacheControl(relative(distDir, filePath))
-      if (cacheControl) res.setHeader('Cache-Control', cacheControl)
-    },
+    setHeaders: setStaticHeaders,
   }))
   app.use(async (ctx) => {
     if ((ctx.method === 'GET' || ctx.method === 'HEAD') &&
       !ctx.path.startsWith('/api') &&
       ctx.path !== '/health') {
       ctx.set('Cache-Control', SPA_ENTRY_CACHE_CONTROL)
-      await send(ctx, 'index.html', { root: distDir })
+      await send(ctx, 'index.html', { root: distDir, setHeaders: setStaticHeaders })
     }
   })
   console.log('[bootstrap] SPA fallback registered')

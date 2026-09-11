@@ -190,6 +190,20 @@ function responseErrorCode(text: string): string | undefined {
   }
 }
 
+// In-flight GET dedupe. Startup fires several identical reads (profiles,
+// config, auth/me, available-models) from independent stores/components;
+// sharing the promise cuts duplicate tunnel round trips without touching
+// call sites (upstream-merge friendly).
+const inflightGets = new Map<string, Promise<unknown>>()
+
+function dedupeInflightGet<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const existing = inflightGets.get(key)
+  if (existing) return existing as Promise<T>
+  const p = loader().finally(() => inflightGets.delete(key))
+  inflightGets.set(key, p)
+  return p
+}
+
 export async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   await ensureDesktopAuthReady()
   const base = getBaseUrl()
@@ -212,6 +226,13 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     headers['X-Hermes-Profile'] = profileName
   }
 
+  if (options.method === 'GET' || options.method === undefined) {
+    return dedupeInflightGet(`${path}|${headers['Authorization'] ?? ''}`, () => doRequest<T>(url, path, options, headers))
+  }
+  return doRequest<T>(url, path, options, headers)
+}
+
+async function doRequest<T>(url: string, path: string, options: RequestInit, headers: Record<string, string>): Promise<T> {
   const res = await fetch(url, { ...options, headers })
 
   // Global 401 handler — only redirect to login for local BFF endpoints

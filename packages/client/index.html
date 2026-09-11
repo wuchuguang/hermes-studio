@@ -99,6 +99,11 @@
 
   <!-- Prevent FOUC by applying theme classes immediately -->
   <script>
+    // 离线壳 SW: 首帧注册 (iOS PWA 杀进程重开秒出壳, 不等隧道)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(function() {})
+    }
+
     (function() {
       try {
         const brightness = localStorage.getItem('hermes_brightness') || 'system';
