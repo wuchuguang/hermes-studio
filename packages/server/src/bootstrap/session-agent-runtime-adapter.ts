@@ -2,6 +2,8 @@ import { codingAgentRunManager } from '../modules/coding-agents/services/runtime
 import { AgentBridgeClient } from '../modules/hermes/services/bridge/client'
 import { getAgentBridgeManager } from '../modules/hermes/services/bridge/manager'
 import {
+  getCompressionContinuationFromDb,
+  listCompressionChainSessionIds,
   getExactSessionDetailFromDbWithProfile,
   getSessionDetailFromDb,
   getSessionDetailFromDbWithProfile,
@@ -22,6 +24,8 @@ configureSessionAgentRuntime({
   getHermesSessionDetailForProfile: getSessionDetailFromDbWithProfile,
   getHermesSessionDetailPaginatedForProfile: getSessionDetailPaginatedFromDbWithProfile,
   getExactHermesSessionDetailForProfile: getExactSessionDetailFromDbWithProfile,
+  getCompressionContinuation: getCompressionContinuationFromDb,
+  listCompressionChainSessionIds,
   getHermesUsageStats: getUsageStatsFromDb,
   listHermesSessionSummaries: listSessionSummaries,
   listHermesSessionSummaryGroups: listSessionSummaryGroups,

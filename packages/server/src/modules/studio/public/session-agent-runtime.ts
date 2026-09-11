@@ -6,6 +6,8 @@ export interface SessionAgentRuntimeDependencies {
   getHermesSessionDetailForProfile: (...args: any[]) => Promise<any>
   getHermesSessionDetailPaginatedForProfile: (...args: any[]) => Promise<any>
   getExactHermesSessionDetailForProfile: (...args: any[]) => Promise<any>
+  getCompressionContinuation: (sessionId: string, profile?: string) => Promise<{ sessionId: string; title: string | null } | null>
+  listCompressionChainSessionIds: (profile?: string) => Promise<Set<string>>
   getHermesUsageStats: (...args: any[]) => Promise<any>
   listHermesSessionSummaries: (...args: any[]) => Promise<any[]>
   listHermesSessionSummaryGroups: (...args: any[]) => Promise<any>
@@ -31,6 +33,8 @@ export const getHermesSessionDetail = (...args: any[]): Promise<any> => configur
 export const getHermesSessionDetailForProfile = (...args: any[]): Promise<any> => configured().getHermesSessionDetailForProfile(...args)
 export const getHermesSessionDetailPaginatedForProfile = (...args: any[]): Promise<any> => configured().getHermesSessionDetailPaginatedForProfile(...args)
 export const getExactHermesSessionDetailForProfile = (...args: any[]): Promise<any> => configured().getExactHermesSessionDetailForProfile(...args)
+export const getCompressionContinuation = (sessionId: string, profile?: string) => configured().getCompressionContinuation(sessionId, profile)
+export const listCompressionChainSessionIds = (profile?: string) => configured().listCompressionChainSessionIds(profile)
 export const getHermesUsageStats = (...args: any[]): Promise<any> => configured().getHermesUsageStats(...args)
 export const listHermesSessionSummaries = (...args: any[]): Promise<any[]> => configured().listHermesSessionSummaries(...args)
 export const listHermesSessionSummaryGroups = (...args: any[]): Promise<any> => configured().listHermesSessionSummaryGroups(...args)

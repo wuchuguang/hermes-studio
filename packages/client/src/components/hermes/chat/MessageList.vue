@@ -363,6 +363,31 @@ async function openForkParent(event?: MouseEvent) {
   window.location.hash = lineage.parentHref.replace(/^#/, "");
 }
 
+const continuation = computed(() => chatStore.activeSession?.continuation || null);
+
+const continuationHref = computed(() => {
+  const c = continuation.value;
+  if (!c?.sessionId) return "#/hermes/history";
+  const profile = chatStore.activeSession?.profile;
+  return `#/hermes/history/session/${encodeURIComponent(c.sessionId)}${profile ? `?profile=${encodeURIComponent(profile)}` : ""}`;
+});
+
+const canSwitchContinuation = computed(() => {
+  const c = continuation.value;
+  return !!c?.sessionId && chatStore.sessions.some((item) => item.id === c.sessionId);
+});
+
+async function openContinuation(event?: MouseEvent) {
+  const c = continuation.value;
+  if (!c?.sessionId) return;
+  if (canSwitchContinuation.value) {
+    event?.preventDefault();
+    await chatStore.switchSession(c.sessionId);
+    return;
+  }
+  window.location.hash = continuationHref.value.replace(/^#/, "");
+}
+
 function handleApproval(choice: "once" | "session" | "always" | "deny") {
   chatStore.respondApproval(choice);
 }
@@ -650,6 +675,21 @@ defineExpose({
         </div>
       </template>
       <template #before>
+        <div v-if="continuation" class="compression-continuation-banner" role="status">
+          <span class="compression-continuation-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M6 3v6a4 4 0 0 0 4 4h4.2" />
+              <path d="M18 9l4 4-4 4" />
+              <path d="M6 21V3" />
+              <circle cx="6" cy="5" r="2" />
+              <circle cx="6" cy="19" r="2" />
+            </svg>
+          </span>
+          <span class="compression-continuation-text">{{ t("chat.continuationBanner") }}</span>
+          <a class="compression-continuation-link" :href="continuationHref" @click="openContinuation">
+            {{ continuation.title || continuation.sessionId }}
+          </a>
+        </div>
         <div v-if="showHistoryArchiveLink" class="history-archive-link-wrap">
           <a class="history-archive-link" :href="historyArchiveHref">
             {{ t("chat.viewOlderInHistory") }}
@@ -1539,7 +1579,61 @@ defineExpose({
   background: rgba(var(--accent-primary-rgb), 0.14);
 }
 
- .fork-divider {
+.compression-continuation-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  width: min(760px, 100%);
+  margin: 0 auto 12px;
+  padding: 9px 14px;
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.26);
+  border-radius: 12px;
+  background: rgba(var(--accent-primary-rgb), 0.07);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.compression-continuation-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  color: var(--accent-primary);
+  flex: 0 0 auto;
+}
+
+.compression-continuation-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.compression-continuation-text {
+  color: var(--text-secondary);
+}
+
+.compression-continuation-link {
+  color: var(--accent-primary);
+  font-weight: 600;
+  text-decoration: none;
+  max-width: min(360px, calc(100vw - 56px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compression-continuation-link:hover {
+  text-decoration: underline;
+}
+
+.fork-divider {
   display: grid;
   grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr);
   align-items: center;

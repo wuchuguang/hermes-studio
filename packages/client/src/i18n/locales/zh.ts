@@ -858,6 +858,7 @@ export default {
     viewOlderInHistory: '前面的消息请到历史记录查看',
     scrollToBottom: '滚动到底部',
     forkedFrom: 'Fork 来源',
+    continuationBanner: '本段对话已压缩，续链至',
     previousLastMessage: '上一段对话的最后一条消息',
     cliEmptyState: '开始 CLI 对话',
     outlineTitle: '会话大纲',

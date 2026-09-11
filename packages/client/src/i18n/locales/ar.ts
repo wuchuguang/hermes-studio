@@ -851,6 +851,7 @@ export default {
     viewOlderInHistory: 'عرض الرسائل الأقدم في السجل',
     scrollToBottom: 'التمرير إلى الأسفل',
     forkedFrom: 'متفرّعة من',
+    continuationBanner: 'تم ضغط هذه المحادثة وتواصلت في',
     previousLastMessage: 'آخر رسالة سابقة',
     cliEmptyState: 'ابدأ جلسة محادثة CLI',
     outlineTitle: 'مخطط المحادثة',

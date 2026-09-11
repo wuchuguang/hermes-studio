@@ -7,6 +7,8 @@ import {
   getHermesSessionDetailForProfile,
   getHermesSessionDetailPaginatedForProfile,
   getExactHermesSessionDetailForProfile,
+  getCompressionContinuation,
+  listCompressionChainSessionIds,
   getHermesUsageStats,
   listHermesSessionSummaries,
   listHermesSessionSummaryGroups,
@@ -635,7 +637,14 @@ export async function listHermesSessions(ctx: any) {
   const allSessions = isHermesAgentAvailable()
     ? await listHermesSessionSummaries(source, candidateLimit, profile)
     : []
-  const merged = mergeHermesHistorySessions(ctx, profile, allSessions, localSessions, source)
+  // Drop stale local-store snapshots whose id was folded into a state.db
+  // compression chain — otherwise a frozen "error"/"cli" snapshot resurrects
+  // as a phantom entry (e.g. an old segment listed alongside its chain tail).
+  const chainSessionIds = isHermesAgentAvailable()
+    ? await listCompressionChainSessionIds(profile)
+    : new Set<string>()
+  const filteredLocalSessions = localSessions.filter(session => !chainSessionIds.has(session.id))
+  const merged = mergeHermesHistorySessions(ctx, profile, allSessions, filteredLocalSessions, source)
 
   if (paginated) {
     const sorted = [...merged].sort(compareSessionsNewestFirst)
@@ -669,6 +678,10 @@ export async function listHermesSessionGroups(ctx: any) {
     .slice(0, 100)
 
   const localSessions = localListSessions(profile, undefined, 2000)
+  const chainSessionIds = isHermesAgentAvailable()
+    ? await listCompressionChainSessionIds(profile)
+    : new Set<string>()
+  const filteredLocalSessions = localSessions.filter(session => !chainSessionIds.has(session.id))
   const hermesResult = isHermesAgentAvailable()
     ? await listHermesSessionSummaryGroups(limit, profile, includedIds)
     : { groups: [], included: [] }
@@ -677,7 +690,7 @@ export async function listHermesSessionGroups(ctx: any) {
   )
   const sources = new Set<string>([
     ...hermesGroups.keys(),
-    ...localSessions
+    ...filteredLocalSessions
       .map(session => session.source)
       .filter((source): source is string => Boolean(source)),
   ])
@@ -685,7 +698,7 @@ export async function listHermesSessionGroups(ctx: any) {
 
   for (const source of sources) {
     const hermesGroup = hermesGroups.get(source)
-    const localSourceSessions = localSessions.filter(session => session.source === source)
+    const localSourceSessions = filteredLocalSessions.filter(session => session.source === source)
     const merged = mergeHermesHistorySessions(
       ctx,
       profile,
@@ -702,7 +715,7 @@ export async function listHermesSessionGroups(ctx: any) {
     })
   }
 
-  const localIncluded = localSessions.filter(session => includedIds.includes(session.id))
+  const localIncluded = filteredLocalSessions.filter(session => includedIds.includes(session.id))
   const included = mergeHermesHistorySessions(ctx, profile, hermesResult.included, localIncluded)
   ctx.body = { groups, included }
 }
@@ -1116,6 +1129,18 @@ export async function getContext(ctx: any) {
 export async function getHermesSession(ctx: any) {
   const profile = requestedProfile(ctx)
 
+  // Attach compression continuation (if any) so the client can render a
+  // "compressed → continued here" banner instead of showing a stale snapshot.
+  const withContinuation = async (session: any) => {
+    const endReason = String(session?.end_reason || session?.ended_reason || '')
+    // Also probe state.db when a local snapshot is stale (error/compression):
+    // the Agent-side chain often has a continuation the local store missed.
+    if (endReason !== 'compression' && endReason !== 'compressed' && endReason !== 'error') return session
+    const continuation = await getCompressionContinuation(session.id, profile || undefined)
+    if (!continuation) return session
+    return { ...session, continuation }
+  }
+
   // Prefer the Web UI local session store. Hermes state.db can lag behind or
   // miss messages for Bridge-backed runs, while the local store is the source
   // used by chat rendering and compression.
@@ -1123,7 +1148,7 @@ export async function getHermesSession(ctx: any) {
   const localSessionProfile = (localSession?.profile || 'default') as string
   if (localSession && isHermesHistorySessionSource(localSession.source) && (!profile || localSessionProfile === profile)) {
     if (denySessionAccess(ctx, localSession)) return
-    ctx.body = { session: localSession }
+    ctx.body = { session: await withContinuation(localSession) }
     return
   }
 
@@ -1148,7 +1173,7 @@ export async function getHermesSession(ctx: any) {
         push_enabled: Number(matchingLocalSession?.push_enabled || 0) !== 0 ? 1 : 0,
       }
       if (denySessionAccess(ctx, sessionWithProfile)) return
-      ctx.body = { session: sessionWithProfile }
+      ctx.body = { session: await withContinuation(sessionWithProfile) }
       return
     }
   } catch (err) {
@@ -1169,7 +1194,7 @@ export async function getHermesSession(ctx: any) {
     return
   }
   if (denySessionAccess(ctx, session)) return
-  ctx.body = { session: { ...session, push_enabled: 0 } }
+  ctx.body = { session: await withContinuation({ ...session, push_enabled: 0 }) }
 }
 
 export async function importHermesSession(ctx: any) {
@@ -2124,6 +2149,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
   }
   const session = { ...result.session, profile: (result.session as any).profile || profile || 'default' }
   if (denySessionAccess(ctx, session)) return
+  const continuation = await getCompressionContinuation(session.id, profile || undefined)
   const assistantMessageIds = result.messages
     .filter((message: any) => String(message.display_role || message.role || '') === 'assistant')
     .map((message: any) => message.id)
@@ -2147,6 +2173,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       message_count: session.message_count,
       input_tokens: session.input_tokens,
       output_tokens: session.output_tokens,
+      continuation,
     },
     messages: result.messages,
     taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),

@@ -395,9 +395,17 @@ function isCompressionEnded(session: HermesSessionInternalRow | undefined): bool
   return !!session && COMPRESSION_END_REASONS.has(String(session.end_reason || ''))
 }
 
+// Compression writes the continuation session *before* marking the parent
+// ended, so child.started_at can land a few hundred ms BEFORE parent.ended_at
+// (see real rows: ~26-48ms skew). A strict `started >= ended` comparison would
+// break the chain and silently drop the continuation. This tolerance absorbs
+// that ordering skew without linking genuinely unrelated sessions.
+const COMPRESSION_CONTINUATION_SKEW_SECONDS = 2
+
 function isCompressionContinuation(parent: HermesSessionInternalRow | undefined, child: HermesSessionInternalRow | undefined): boolean {
   if (!parent || !child || !isCompressionEnded(parent) || parent.ended_at == null) return false
-  return child.source !== 'tool' && Number(child.started_at || 0) >= Number(parent.ended_at || 0)
+  const skewThreshold = Number(parent.ended_at) - COMPRESSION_CONTINUATION_SKEW_SECONDS
+  return child.source !== 'tool' && Number(child.started_at || 0) >= skewThreshold
 }
 
 function latestSessionInChain(chain: HermesSessionInternalRow[]): HermesSessionInternalRow {
@@ -507,8 +515,9 @@ function selectCompressionContinuationChild(
   candidates: HermesSessionInternalRow[],
 ): HermesSessionInternalRow | null {
   if (!isCompressionEnded(parent) || parent.ended_at == null) return null
+  const skewThreshold = Number(parent.ended_at) - COMPRESSION_CONTINUATION_SKEW_SECONDS
   return candidates
-    .filter(candidate => Number(candidate.started_at || 0) >= Number(parent.ended_at || 0))
+    .filter(candidate => Number(candidate.started_at || 0) >= skewThreshold)
     .sort((a, b) => {
       const aDelta = Number(a.started_at || 0) - Number(parent.ended_at || 0)
       const bDelta = Number(b.started_at || 0) - Number(parent.ended_at || 0)
@@ -754,6 +763,38 @@ export async function getSessionDetailFromDb(sessionId: string): Promise<HermesS
     db.close()
   }
 }
+
+/**
+ * Resolve the latest continuation of a compression chain for a given session
+ * id. Returns null when the session is not compression-ended, has no
+ * continuation child, or is already the chain tail. Used by the session detail
+ * endpoint to surface a "compressed → continued here" banner instead of leaving
+ * the UI stuck at the compression point.
+ */
+export async function getCompressionContinuationFromDb(
+  sessionId: string,
+  profile?: string,
+): Promise<{ sessionId: string; title: string | null } | null> {
+  if (!SQLITE_AVAILABLE) return null
+  const { DatabaseSync } = await import('node:sqlite')
+  const dbPath = profile ? sessionDbPathForProfile(profile) : sessionDbPath()
+  let db: any
+  try {
+    db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+  } catch {
+    return null
+  }
+  try {
+    const chain = loadSessionChain(db, sessionId)
+    if (chain.length < 2) return null
+    const tail = latestSessionInChain(chain)
+    if (!tail || tail.id === sessionId) return null
+    return { sessionId: tail.id, title: tail.title || tail.preview || null }
+  } finally {
+    db.close()
+  }
+}
+
 
 export async function getSessionDetailFromDbWithProfile(sessionId: string, profile: string): Promise<HermesSessionDetailRow | null> {
   const { DatabaseSync } = await import('node:sqlite')
@@ -1574,6 +1615,37 @@ export async function getUsageStatsFromDb(
       cost: normalizeNumber(totals.cost),
       total_api_calls: normalizeNumber(totals.total_api_calls),
     }
+  } finally {
+    db.close()
+  }
+}
+
+/**
+ * All session ids participating in any compression chain (roots + interior
+ * segments + tails). Used by the session list merge to drop stale local-store
+ * snapshots whose id was folded into a state.db chain — otherwise a frozen
+ * "error"/"cli" snapshot resurrects as a phantom list entry.
+ */
+export async function listCompressionChainSessionIds(profile?: string): Promise<Set<string>> {
+  if (!SQLITE_AVAILABLE) return new Set()
+  const { DatabaseSync } = await import('node:sqlite')
+  const dbPath = profile ? sessionDbPathForProfile(profile) : sessionDbPath()
+  let db: any
+  try {
+    db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+  } catch {
+    return new Set()
+  }
+  try {
+    const idx = loadAllSessions(db)
+    const chainIds = new Set<string>()
+    for (const root of idx.byId.values()) {
+      const chain = collectSessionChain(root, idx)
+      if (chain.length > 1) {
+        for (const s of chain) chainIds.add(s.id)
+      }
+    }
+    return chainIds
   } finally {
     db.close()
   }

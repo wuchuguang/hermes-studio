@@ -486,6 +486,9 @@ export interface Session {
   workspaceExtraDirs?: string[]
   categoryId?: number | null
   isLocalOnly?: boolean
+  /** Compression continuation: when this session was compacted into a new
+   * session id, points at the chain tail so the UI can offer to jump. */
+  continuation?: { sessionId: string; title: string | null } | null
   /** Per-session reasoning effort override.
    * Empty string / undefined = use config.yaml default.
    * Values: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' */
@@ -1192,6 +1195,7 @@ function mapHermesSession(s: SessionSummary): Session {
       ? (s as any).workspace_extra_dirs.filter((d: unknown) => typeof d === 'string' && d)
       : [],
     categoryId: s.category_id ?? null,
+    continuation: s.continuation ?? null,
   }
 }
 
@@ -1928,6 +1932,7 @@ export const useChatStore = defineStore('chat', () => {
       target.parentTitle = detail.session.parent_title || target.parentTitle || null
       target.parentLastMessage = detail.session.parent_last_message || target.parentLastMessage || null
       target.parentLastMessageRole = detail.session.parent_last_message_role || target.parentLastMessageRole || null
+      target.continuation = (detail.session as any).continuation || target.continuation || null
       return true
     } catch (err) {
       console.error('Failed to refresh active session:', err)

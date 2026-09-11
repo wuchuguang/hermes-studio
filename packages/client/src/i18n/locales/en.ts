@@ -858,6 +858,7 @@ export default {
     viewOlderInHistory: 'View earlier messages in History',
     scrollToBottom: 'Scroll to bottom',
     forkedFrom: 'Forked from',
+    continuationBanner: 'This conversation was compressed and continued as',
     previousLastMessage: 'Previous last message',
     cliEmptyState: 'Start a CLI chat session',
     outlineTitle: 'Conversation Outline',

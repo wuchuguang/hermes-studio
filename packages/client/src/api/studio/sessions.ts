@@ -40,6 +40,7 @@ export interface SessionSummary {
   workspace?: string | null
   category_id?: number | null
   webui_imported?: boolean
+  continuation?: { sessionId: string; title: string | null } | null
 }
 
 export interface SessionCategory {
