@@ -594,6 +594,24 @@ export async function fetchStudioProjects(): Promise<StudioProject[]> {
   }
 }
 
+export interface DirSearchHit {
+  path: string
+  name: string
+}
+
+/** Fuzzy-search directories under the workspace base by name. */
+export async function searchWorkspaceDirs(q: string): Promise<DirSearchHit[]> {
+  if (!q || q.trim().length < 2) return []
+  try {
+    const res = await request<{ dirs?: DirSearchHit[] }>(
+      `/api/studio/projects/dir-search?q=${encodeURIComponent(q.trim())}`,
+    )
+    return Array.isArray(res?.dirs) ? res.dirs : []
+  } catch {
+    return []
+  }
+}
+
 export async function setSessionCategory(id: string, categoryId: number | null): Promise<void> {
   await request(`/api/studio/sessions/${encodeURIComponent(id)}/category`, {
     method: 'POST',

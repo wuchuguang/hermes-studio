@@ -18,3 +18,18 @@ projectRoutes.get('/api/studio/projects', async (ctx) => {
     ctx.body = { projects: [], ok: true, error: err?.message || 'list failed' }
   }
 })
+
+/**
+ * GET /api/studio/projects/dir-search?q=... — fuzzy directory search under
+ * the workspace base, for picking extra dirs by name instead of by hand.
+ */
+projectRoutes.get('/api/studio/projects/dir-search', async (ctx) => {
+  const { searchWorkspaceDirs } = await import('../services/workspace/dir-search')
+  const q = String(ctx.query.q || '')
+  try {
+    const dirs = await searchWorkspaceDirs(q)
+    ctx.body = { dirs, ok: true }
+  } catch (err: any) {
+    ctx.body = { dirs: [], ok: true, error: err?.message || 'search failed' }
+  }
+})

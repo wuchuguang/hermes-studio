@@ -44,6 +44,7 @@ import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { copyToClipboard } from "@/utils/clipboard";
 import FolderPicker from "./FolderPicker.vue";
+import DirSearchPicker from "./DirSearchPicker.vue";
 import ChatInput from "./ChatInput.vue";
 import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
@@ -864,6 +865,8 @@ const newChatBaseUrl = ref<string>("");
 const newChatApiKey = ref<string>("");
 const newChatApiMode = ref<CodingAgentApiMode>("codex_responses");
 const newChatWorkspace = ref("");
+const newChatProjectSlug = ref<string | null>(null);
+const newChatExtraDirs = ref<string[]>([]);
 const newChatCategoryId = ref<number | null>(null);
 const newChatCategoryCreating = ref(false);
 const newChatCategorySelectRevision = ref(0);
@@ -876,6 +879,22 @@ const newChatCategoryOptions = computed(() => [
     value: category.id,
   })),
 ]);
+
+async function handleNewChatProjectChange(slug: string | null) {
+  newChatProjectSlug.value = slug;
+  if (!slug) {
+    newChatExtraDirs.value = [];
+    return;
+  }
+  const project = workspaceProjects.value.find((p) => p.slug === slug);
+  if (!project) return;
+  const paths = project.folders.map((f) => f.path);
+  const primary = project.primary_path || paths[0];
+  if (!primary) return;
+  // Main workspace = primary repo; extras = remaining member dirs.
+  newChatWorkspace.value = primary;
+  newChatExtraDirs.value = paths.filter((d) => d !== primary);
+}
 
 async function handleNewChatCategoryChange(value: string | number | null) {
   if (value === null || value === 0) {
@@ -1287,6 +1306,9 @@ async function openNewChatModal() {
   showNewChatModal.value = true;
   newChatLoading.value = true;
   newChatCategoryId.value = null;
+  newChatProjectSlug.value = null;
+  newChatExtraDirs.value = [];
+  void loadWorkspaceProjects();
   try {
     await loadSessionCategories();
     // Fetch agent install status so the agent dropdown only shows installed agents.
@@ -1409,6 +1431,7 @@ async function confirmNewChat() {
     codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
     codingAgentMode: source === "coding_agent" ? codingAgentMode : undefined,
     workspace: newChatWorkspace.value || null,
+    workspaceExtraDirs: newChatExtraDirs.value.length ? [...newChatExtraDirs.value] : undefined,
     categoryId: newChatCategoryId.value,
     baseUrl: source === "coding_agent" && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
     apiKey: source === "coding_agent" && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
@@ -2085,7 +2108,7 @@ const showWorkspaceModal = ref(false);
 const workspaceValue = ref("");
 const workspaceSessionId = ref<string | null>(null);
 const workspaceExtraDirs = ref<string[]>([]);
-const workspaceExtraPicking = ref(false);
+const workspaceExtraPicking = ref<'' | 'browse' | 'search'>("");
 const workspaceExtraPending = ref("");
 
 function openActiveSessionWorkspace() {
@@ -2136,7 +2159,7 @@ function handleProjectSelected(slug: string | null) {
 
 function handleWorkspaceExtraAdd(dir: string | null) {
   const value = String(dir || "").trim();
-  workspaceExtraPicking.value = false;
+  workspaceExtraPicking.value = "";
   workspaceExtraPending.value = "";
   if (!value) return;
   if (value === (workspaceValue.value || "").trim()) return;
@@ -2896,20 +2919,37 @@ async function handleSessionModelCustomSubmit() {
         <div class="workspace-extra-section">
           <div class="workspace-extra-header">
             <span class="workspace-extra-title">{{ t('chat.workspaceExtraDirs') }}</span>
-            <NButton
-              size="tiny"
-              quaternary
-              type="primary"
-              @click="workspaceExtraPicking = !workspaceExtraPicking"
-            >
-              {{ workspaceExtraPicking ? t('common.cancel') : t('chat.workspaceExtraAdd') }}
-            </NButton>
+            <div class="workspace-extra-actions">
+              <NButton
+                size="tiny"
+                quaternary
+                :type="workspaceExtraPicking === 'search' ? 'primary' : 'default'"
+                @click="workspaceExtraPicking = workspaceExtraPicking === 'search' ? '' : 'search'"
+              >
+                {{ t('chat.dirSearchToggle') }}
+              </NButton>
+              <NButton
+                size="tiny"
+                quaternary
+                :type="workspaceExtraPicking === 'browse' ? 'primary' : 'default'"
+                @click="workspaceExtraPicking = workspaceExtraPicking === 'browse' ? '' : 'browse'"
+              >
+                {{ t('chat.workspaceExtraAdd') }}
+              </NButton>
+            </div>
           </div>
           <FolderPicker
-            v-if="workspaceExtraPicking"
+            v-if="workspaceExtraPicking === 'browse'"
             v-model="workspaceExtraPending"
             class="workspace-extra-picker"
             @update:model-value="handleWorkspaceExtraAdd"
+          />
+          <DirSearchPicker
+            v-else-if="workspaceExtraPicking === 'search'"
+            :model-value="workspaceExtraDirs"
+            hide-chips
+            class="workspace-extra-picker"
+            @update:model-value="workspaceExtraDirs = $event"
           />
           <div v-if="workspaceExtraDirs.length" class="workspace-extra-list">
             <div v-for="dir in workspaceExtraDirs" :key="dir" class="workspace-extra-item">
@@ -3220,6 +3260,20 @@ async function handleSessionModelCustomSubmit() {
             />
           </label>
           <div class="new-chat-field">
+            <span class="new-chat-label">{{ t("chat.workspaceProject") }}</span>
+            <NSelect
+              v-if="workspaceProjects.length"
+              :value="newChatProjectSlug"
+              :options="workspaceProjectOptions"
+              :loading="workspaceProjectsLoading"
+              :placeholder="t('chat.workspaceProjectPlaceholder')"
+              size="small"
+              clearable
+              @update:value="handleNewChatProjectChange"
+            />
+            <span v-else class="new-chat-field-hint">{{ t("chat.workspaceProjectEmpty") }}</span>
+          </div>
+          <div class="new-chat-field">
             <span class="new-chat-label">
               {{ t("chat.workspace") }}
               <NTooltip v-if="isCurrentWorkspaceDefault">
@@ -3269,6 +3323,24 @@ async function handleSessionModelCustomSubmit() {
               :favorite-disabled="!newChatWorkspace"
               :favorite-title="isCurrentWorkspaceDefault ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
               @toggle-favorite="handleToggleDefaultWorkspace"
+            />
+            <div v-if="newChatExtraDirs.length" class="workspace-extra-list new-chat-extra-list">
+              <div v-for="dir in newChatExtraDirs" :key="dir" class="workspace-extra-item">
+                <span class="workspace-extra-path" :title="dir">{{ dir }}</span>
+                <NButton
+                  size="tiny"
+                  quaternary
+                  type="error"
+                  @click="newChatExtraDirs = newChatExtraDirs.filter((d) => d !== dir)"
+                >
+                  {{ t('common.delete') }}
+                </NButton>
+              </div>
+            </div>
+            <DirSearchPicker
+              :model-value="newChatExtraDirs"
+              hide-chips
+              @update:model-value="newChatExtraDirs = $event"
             />
             <div v-if="recentWorkspaces.length > 0" class="recent-workspaces">
               <span class="recent-workspaces-label">{{ t("chat.workspaceRecent") }}:</span>
@@ -3673,6 +3745,16 @@ async function handleSessionModelCustomSubmit() {
   flex-direction: column;
   gap: 6px;
   margin-bottom: 8px;
+}
+
+.workspace-extra-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.new-chat-extra-list {
+  margin: 6px 0;
 }
 
 .workspace-extra-list {
