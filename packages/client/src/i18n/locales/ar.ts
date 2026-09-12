@@ -852,6 +852,7 @@ export default {
     scrollToBottom: 'التمرير إلى الأسفل',
     forkedFrom: 'متفرّعة من',
     continuationBanner: 'تم ضغط هذه المحادثة وتواصلت في',
+    threadSegments: '{total} أجزاء · تعرض الجزء {index}',
     previousLastMessage: 'آخر رسالة سابقة',
     cliEmptyState: 'ابدأ جلسة محادثة CLI',
     outlineTitle: 'مخطط المحادثة',

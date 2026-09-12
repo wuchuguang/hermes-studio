@@ -41,6 +41,8 @@ export interface SessionSummary {
   category_id?: number | null
   webui_imported?: boolean
   continuation?: { sessionId: string; title: string | null } | null
+  thread_session_count?: number
+  thread_index?: number
 }
 
 export interface SessionCategory {
@@ -567,6 +569,28 @@ export async function setSessionWorkspace(
     return true
   } catch {
     return false
+  }
+}
+
+/** A Hermes first-class Project: a named multi-folder workspace (projects.db). */
+export interface StudioProject {
+  id: string
+  slug: string
+  name: string
+  description: string | null
+  primary_path: string | null
+  folders: Array<{ path: string; label: string | null; is_primary: number }>
+}
+
+/** Read-only list of Hermes projects (`hermes project ...` manages writes). */
+export async function fetchStudioProjects(): Promise<StudioProject[]> {
+  try {
+    const res = await request<{ projects?: StudioProject[] }>(
+      '/api/studio/projects',
+    )
+    return Array.isArray(res?.projects) ? res.projects : []
+  } catch {
+    return []
   }
 }
 

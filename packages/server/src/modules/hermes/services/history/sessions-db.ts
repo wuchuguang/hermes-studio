@@ -65,6 +65,8 @@ export interface HermesMessageRow {
 export interface HermesSessionDetailRow extends HermesSessionRow {
   messages: HermesMessageRow[]
   thread_session_count: number
+  /** 1-based position of the requested segment inside its compression chain. */
+  thread_index?: number
 }
 
 export interface PaginatedHermesSessionDetailResult {
@@ -457,6 +459,14 @@ interface SessionIndex {
   childrenByParent: Map<string, string[]>
 }
 
+// Short-lived cache for the full-session index. loadAllSessions() reads every
+// session row on each call, which dominates list latency once the db grows
+// past a few thousand sessions. Session metadata only changes when a message
+// lands, so a TTL of a few seconds is safe and keeps chains (including brand
+// new continuations) visible almost immediately.
+const SESSION_INDEX_CACHE_TTL_MS = 3_000
+const sessionIndexCache = new Map<string, { at: number; idx: SessionIndex }>()
+
 function loadAllSessions(db: { prepare: (sql: string) => { all: (...params: any[]) => Record<string, unknown>[] } }): SessionIndex {
   const rows = db.prepare(`
     SELECT
@@ -475,6 +485,16 @@ function loadAllSessions(db: { prepare: (sql: string) => { all: (...params: any[
     childrenByParent.set(key, list)
   }
   return { byId, childrenByParent }
+}
+
+/** loadAllSessions with a per-db-file TTL cache (see SESSION_INDEX_CACHE_TTL_MS). */
+function loadAllSessionsCached(db: { prepare: (sql: string) => { all: (...params: any[]) => Record<string, unknown>[] } }, dbPath: string): SessionIndex {
+  const now = Date.now()
+  const hit = sessionIndexCache.get(dbPath)
+  if (hit && now - hit.at < SESSION_INDEX_CACHE_TTL_MS) return hit.idx
+  const idx = loadAllSessions(db)
+  sessionIndexCache.set(dbPath, { at: now, idx })
+  return idx
 }
 
 type SessionLookupDb = {
@@ -691,6 +711,9 @@ function aggregateSessionDetail(
     cost_status: costStatuses.length === 1 ? costStatuses[0] : (costStatuses.length > 1 ? 'mixed' : ''),
     messages,
     thread_session_count: chain.length,
+    // 1-based position of the requested segment within the chain (for the
+    // "segment i of n" indicator); chain rows are already in chronological order.
+    thread_index: Math.max(1, chain.findIndex(session => session.id === requestedSessionId) + 1),
   }
 }
 
@@ -1637,7 +1660,7 @@ export async function listCompressionChainSessionIds(profile?: string): Promise<
     return new Set()
   }
   try {
-    const idx = loadAllSessions(db)
+    const idx = loadAllSessionsCached(db, dbPath)
     const chainIds = new Set<string>()
     for (const root of idx.byId.values()) {
       const chain = collectSessionChain(root, idx)
@@ -1661,7 +1684,7 @@ export async function listSessionSummaries(source?: string, limit = 2000, profil
   const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
 
   try {
-    const idx = loadAllSessions(db)
+    const idx = loadAllSessionsCached(db, dbPath)
     return [...idx.byId.values()]
       .filter(session => !source || session.source === source)
       .filter(session => !isCompressionContinuationChild(session, idx))
@@ -1684,7 +1707,7 @@ export async function listSessionSummaryGroups(
 
   const db = await openSessionDb(profile)
   try {
-    const idx = loadAllSessions(db)
+    const idx = loadAllSessionsCached(db, profile ? sessionDbPathForProfile(profile) : sessionDbPath())
     const grouped = new Map<string, HermesSessionRow[]>()
     const includedIds = new Set(includedSessionIds)
     const included = new Map<string, HermesSessionRow>()
@@ -1792,7 +1815,7 @@ export async function searchSessionSummariesWithProfile(
         ? (db.prepare(contentSql).all(...sourceParams, prefixQuery, candidateLimit) as Record<string, unknown>[])
         : []
 
-    const idx = loadAllSessions(db)
+    const idx = loadAllSessionsCached(db, sessionDbPath())
     const merged = new Map<string, HermesSessionSearchRow>()
     for (const row of titleRows) {
       const mapped = projectSearchRow(row, idx, source)
@@ -1901,7 +1924,7 @@ export async function searchSessionSummaries(
         ? (db.prepare(contentSql).all(...sourceParams, prefixQuery, candidateLimit) as Record<string, unknown>[])
         : []
 
-    const idx = loadAllSessions(db)
+    const idx = loadAllSessionsCached(db, sessionDbPath())
     const merged = new Map<string, HermesSessionSearchRow>()
     for (const row of titleRows) {
       const mapped = projectSearchRow(row, idx, source)
@@ -1926,7 +1949,7 @@ export async function searchSessionSummaries(
     const likeRows = containsCjk(normalized)
       ? runLiteralContentSearch(db, source, trimmed, candidateLimit)
       : []
-    const idx2 = loadAllSessions(db)
+    const idx2 = loadAllSessionsCached(db, sessionDbPath())
     const merged = new Map<string, HermesSessionSearchRow>()
     for (const row of titleRows) {
       const mapped = projectSearchRow(row, idx2, source)

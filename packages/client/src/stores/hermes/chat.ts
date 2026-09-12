@@ -489,6 +489,9 @@ export interface Session {
   /** Compression continuation: when this session was compacted into a new
    * session id, points at the chain tail so the UI can offer to jump. */
   continuation?: { sessionId: string; title: string | null } | null
+  /** Total segments in this compression chain and this segment's 1-based position. */
+  threadSessionCount?: number
+  threadIndex?: number
   /** Per-session reasoning effort override.
    * Empty string / undefined = use config.yaml default.
    * Values: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' */
@@ -1196,6 +1199,8 @@ function mapHermesSession(s: SessionSummary): Session {
       : [],
     categoryId: s.category_id ?? null,
     continuation: s.continuation ?? null,
+    threadSessionCount: s.thread_session_count ?? undefined,
+    threadIndex: s.thread_index ?? undefined,
   }
 }
 
@@ -1933,6 +1938,8 @@ export const useChatStore = defineStore('chat', () => {
       target.parentLastMessage = detail.session.parent_last_message || target.parentLastMessage || null
       target.parentLastMessageRole = detail.session.parent_last_message_role || target.parentLastMessageRole || null
       target.continuation = (detail.session as any).continuation || target.continuation || null
+      target.threadSessionCount = (detail.session as any).thread_session_count || target.threadSessionCount || undefined
+      target.threadIndex = (detail.session as any).thread_index || target.threadIndex || undefined
       return true
     } catch (err) {
       console.error('Failed to refresh active session:', err)

@@ -365,6 +365,13 @@ async function openForkParent(event?: MouseEvent) {
 
 const continuation = computed(() => chatStore.activeSession?.continuation || null);
 
+const threadInfo = computed(() => {
+  const s = chatStore.activeSession;
+  const total = s?.threadSessionCount || 0;
+  if (total < 2) return null;
+  return { total, index: s?.threadIndex || 1 };
+});
+
 const continuationHref = computed(() => {
   const c = continuation.value;
   if (!c?.sessionId) return "#/hermes/history";
@@ -675,7 +682,7 @@ defineExpose({
         </div>
       </template>
       <template #before>
-        <div v-if="continuation" class="compression-continuation-banner" role="status">
+        <div v-if="continuation || threadInfo" class="compression-continuation-banner" role="status">
           <span class="compression-continuation-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
               <path d="M6 3v6a4 4 0 0 0 4 4h4.2" />
@@ -685,10 +692,15 @@ defineExpose({
               <circle cx="6" cy="19" r="2" />
             </svg>
           </span>
-          <span class="compression-continuation-text">{{ t("chat.continuationBanner") }}</span>
-          <a class="compression-continuation-link" :href="continuationHref" @click="openContinuation">
-            {{ continuation.title || continuation.sessionId }}
-          </a>
+          <span v-if="threadInfo" class="compression-continuation-text">
+            {{ t("chat.threadSegments", { total: threadInfo.total, index: threadInfo.index }) }}
+          </span>
+          <template v-if="continuation">
+            <span class="compression-continuation-text">{{ t("chat.continuationBanner") }}</span>
+            <a class="compression-continuation-link" :href="continuationHref" @click="openContinuation">
+              {{ continuation.title || continuation.sessionId }}
+            </a>
+          </template>
         </div>
         <div v-if="showHistoryArchiveLink" class="history-archive-link-wrap">
           <a class="history-archive-link" :href="historyArchiveHref">

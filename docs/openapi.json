@@ -7983,7 +7983,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "custom"
+              ]
             }
           }
         ]
@@ -8109,7 +8112,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "custom"
+              ]
             }
           }
         ]

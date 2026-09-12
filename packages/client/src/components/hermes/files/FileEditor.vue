@@ -4,7 +4,11 @@ import { NButton, NSpace, useMessage, useDialog } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore } from '@/stores/hermes/files'
 import FileTreeToggle from './FileTreeToggle.vue'
-import * as monaco from 'monaco-editor'
+// Monaco is ~1MB minified; load it lazily on first editor mount instead of
+// pulling it into the entry graph of every chat page load.
+import type * as MonacoNS from 'monaco-editor'
+
+let monaco: typeof MonacoNS | null = null
 
 // Configure Monaco workers using import.meta.url
 ;(self as any).MonacoEnvironment = {
@@ -33,13 +37,16 @@ const emit = defineEmits<{
 }>()
 
 const editorContainer = ref<HTMLElement | null>(null)
-let editor: monaco.editor.IStandaloneCodeEditor | null = null
+const editorRef = ref<MonacoNS.editor.IStandaloneCodeEditor | null>(null)
 const saving = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
   if (!editorContainer.value || !filesStore.editingFile) return
 
-  editor = monaco.editor.create(editorContainer.value, {
+  monaco = await import('monaco-editor')
+  if (!editorContainer.value || !filesStore.editingFile) return
+
+  const instance = monaco.editor.create(editorContainer.value, {
     value: filesStore.editingFile.content,
     language: filesStore.editingFile.language,
     theme: document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs',
@@ -62,22 +69,23 @@ onMounted(() => {
       horizontalScrollbarSize: 0,
     },
   })
+  editorRef.value = instance
 
-  editor.onDidChangeModelContent(() => {
+  instance.onDidChangeModelContent(() => {
     if (filesStore.editingFile) {
-      filesStore.editingFile.content = editor!.getValue()
+      filesStore.editingFile.content = instance.getValue()
     }
   })
 
   // Ctrl/Cmd + S to save
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+  instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
     handleSave()
   })
 })
 
 onBeforeUnmount(() => {
-  editor?.dispose()
-  editor = null
+  editorRef.value?.dispose()
+  editorRef.value = null
 })
 
 async function handleSave() {
