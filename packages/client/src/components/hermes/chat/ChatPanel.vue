@@ -5,11 +5,13 @@ import {
   deleteSessionCategory,
   exportSession,
   fetchSessionCategories,
+  fetchStudioProjects,
   renameSession,
   renameSessionCategory,
   setSessionCategory,
   setSessionWorkspace,
   type SessionCategory,
+  type StudioProject,
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
 import { fetchCodingAgentsStatus, inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
@@ -2091,7 +2093,44 @@ function openActiveSessionWorkspace() {
   workspaceValue.value = session.workspace || "";
   workspaceExtraDirs.value = [...(session.workspaceExtraDirs || [])];
   showWorkspaceModal.value = true;
+  void loadWorkspaceProjects();
 }
+
+// --- Project (multi-folder workspace) binding -------------------------------
+const workspaceProjects = ref<StudioProject[]>([]);
+const workspaceProjectsLoading = ref(false);
+const selectedProjectSlug = ref<string | null>(null);
+
+async function loadWorkspaceProjects() {
+  if (workspaceProjectsLoading.value) return;
+  workspaceProjectsLoading.value = true;
+  try {
+    workspaceProjects.value = await fetchStudioProjects();
+  } finally {
+    workspaceProjectsLoading.value = false;
+  }
+}
+
+const workspaceProjectOptions = computed(() =>
+  workspaceProjects.value.map((p) => ({
+    label: `${p.name} (${p.folders.length} dirs)`,
+    value: p.slug,
+  })),
+);
+
+function handleProjectSelected(slug: string | null) {
+  selectedProjectSlug.value = slug;
+  if (!slug) return;
+  const project = workspaceProjects.value.find((p) => p.slug === slug);
+  if (!project) return;
+  const paths = project.folders.map((f) => f.path);
+  const primary = project.primary_path || paths[0];
+  if (!primary) return;
+  // Main workspace = primary repo; extras = the remaining member dirs.
+  workspaceValue.value = primary;
+  workspaceExtraDirs.value = paths.filter((d) => d !== primary);
+}
+// ---------------------------------------------------------------------------
 
 function handleWorkspaceExtraAdd(dir: string | null) {
   const value = String(dir || "").trim();
@@ -2837,6 +2876,20 @@ async function handleSessionModelCustomSubmit() {
       @positive-click="handleWorkspaceConfirm"
     >
       <div class="workspace-modal-body">
+        <div v-if="workspaceProjects.length" class="workspace-project-section">
+          <div class="workspace-extra-header">
+            <span class="workspace-extra-title">{{ t('chat.workspaceProject') }}</span>
+          </div>
+          <NSelect
+            :value="selectedProjectSlug"
+            :options="workspaceProjectOptions"
+            :loading="workspaceProjectsLoading"
+            :placeholder="t('chat.workspaceProjectPlaceholder')"
+            size="small"
+            clearable
+            @update:value="handleProjectSelected"
+          />
+        </div>
         <FolderPicker v-model="workspaceValue" />
         <div class="workspace-extra-section">
           <div class="workspace-extra-header">
@@ -3611,6 +3664,13 @@ async function handleSessionModelCustomSubmit() {
 
 .workspace-extra-picker {
   margin-top: 4px;
+}
+
+.workspace-project-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
 .workspace-extra-list {
