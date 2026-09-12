@@ -1974,7 +1974,9 @@ async function handleContextMenuSelect(key: string) {
     );
     workspaceSessionId.value = contextSessionId.value;
     workspaceValue.value = session?.workspace || "";
+    workspaceExtraDirs.value = [...(session?.workspaceExtraDirs || [])];
     showWorkspaceModal.value = true;
+    void loadWorkspaceProjects();
   } else if (key === "model") {
     await openSessionModelModal(contextSessionId.value);
   } else if (key === "rename") {
