@@ -1,3 +1,4 @@
+import { withTaskPlanTurnContext } from '../task-plan-runs'
 import type { Server, Socket } from 'socket.io'
 import { chatCodingAgentRunManager as codingAgentRunManager } from '../../public/chat-agent-runtime'
 import {
@@ -17,6 +18,7 @@ import { getSession, updateSession } from '../../repositories/session-store'
 import { logger } from '../../public/logging'
 
 export interface CodingAgentRunSocketData {
+  task_plan_context_id?: string
   input: string | ContentBlock[]
   session_id?: string
   profile?: string
@@ -36,6 +38,7 @@ export interface CodingAgentRunSocketData {
   apiMode?: any
   api_mode?: any
   reasoning_effort?: string
+  agent_preset?: string
   push_enabled?: boolean
   instructions?: string
   session_source?: 'global_agent' | 'workflow' | 'group_chat'
@@ -46,7 +49,7 @@ export interface CodingAgentRunSocketData {
 
 function codingAgentId(data: CodingAgentRunSocketData): Exclude<ChatCodingAgentId, 'ekko-agent'> {
   const value = data.coding_agent_id || data.agent_id || 'claude-code'
-  if (value === 'codex' || value === 'pi' || value === 'grok' || value === 'opencode') return value
+  if (value === 'codex' || value === 'pi' || value === 'grok' || (value === 'opencode' || value === 'dsh')) return value
   return 'claude-code'
 }
 
@@ -122,6 +125,7 @@ export async function handleCodingAgentRun(
       apiKey: data.apiKey || data.api_key,
       apiMode: launchApiMode,
       reasoningEffort: launchReasoningEffort,
+      agentPreset: data.agent_preset,
       sessionSource: data.session_source,
       ...(groupSystemPrompt ? { groupSystemPrompt } : {}),
       ...(groupRoomId && groupAgentId
@@ -157,15 +161,16 @@ export async function handleCodingAgentRun(
   try {
     const codingInput = convertContentBlocksForCodingAgent(data.input)
     await writeModelRunProfileToken(socketUser, profile)
-    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || agentId === 'opencode'
+    const includeBaseSystemPrompt = agentId === 'claude-code' || agentId === 'codex' || agentId === 'pi' || agentId === 'grok' || (agentId === 'opencode' || agentId === 'dsh')
     const runPrompt = [
       groupSystemPrompt || (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source }) : ''),
       String(data.instructions || '').trim() === groupSystemPrompt ? '' : String(data.instructions || '').trim(),
     ].filter(Boolean).join('\n')
-    const sent = await (Array.isArray(data.input)
+    const runtimeInput = withTaskPlanTurnContext(codingInput.text, data.task_plan_context_id) as string
+    const sent = await (Array.isArray(data.input) || data.task_plan_context_id
       ? sendCodingAgentRunInput(
         sessionId,
-        codingInput.text,
+        runtimeInput,
         runPrompt,
         codingInput.images,
         contentBlocksToString(data.input),

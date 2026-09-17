@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue";
 import {
   batchDeleteSessions,
   createSessionCategory,
@@ -53,6 +54,7 @@ import SessionListItem from "./SessionListItem.vue";
 import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
+import { chatSessionAgentAvatar } from "@/utils/chat-agent-avatar";
 import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import { buildActiveSessionMenuOptions, buildSessionContextMenuOptions } from "./session-menu-options";
@@ -867,6 +869,8 @@ const newChatApiMode = ref<CodingAgentApiMode>("codex_responses");
 const newChatWorkspace = ref("");
 const newChatProjectSlug = ref<string | null>(null);
 const newChatExtraDirs = ref<string[]>([]);
+const newChatAgentPreset = ref<string>();
+const newChatPresetReady = ref(false);
 const newChatCategoryId = ref<number | null>(null);
 const newChatCategoryCreating = ref(false);
 const newChatCategorySelectRevision = ref(0);
@@ -1038,6 +1042,7 @@ const newChatAgentOptions = computed(() => {
     { label: "Pi", value: "pi" },
     { label: "Grok", value: "grok" },
     { label: "OpenCode", value: "opencode" },
+    { label: "DeepSeek Harness", value: "dsh" },
   ];
   // Hide agents that are not installed on this machine — only offer
   // what the user can actually start a chat with.
@@ -1161,7 +1166,7 @@ const selectedNewChatProviderGroup = computed(() =>
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
-const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || newChatAgent.value === "opencode");
+const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
 const effectiveNewChatAgentMode = computed(() =>
   effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value),
 );
@@ -1184,7 +1189,8 @@ const newChatNeedsApiKey = computed(() =>
   !selectedNewChatProviderGroup.value?.api_key,
 );
 const canConfirmNewChat = computed(() => {
-  if (newChatCategoryCreating.value) return false;
+  if (newChatCategoryCreating.value || newChatLoading.value) return false;
+  if (newChatAgent.value === "dsh" && (!newChatAgentPreset.value || !newChatPresetReady.value)) return false;
   if (!newChatProfile.value) return false;
   if (!newChatUsesProviderModel.value) return true;
   if (!newChatProvider.value || !newChatModel.value) return false;
@@ -1303,6 +1309,8 @@ async function openNewChatModal() {
   isBatchMode.value = false;
   selectedSessionKeys.value.clear();
   showBatchDeleteConfirm.value = false;
+  newChatAgentPreset.value = undefined;
+  newChatPresetReady.value = false;
   showNewChatModal.value = true;
   newChatLoading.value = true;
   newChatCategoryId.value = null;
@@ -1364,6 +1372,7 @@ function handleNewChatProviderChange(value: string) {
 }
 
 async function confirmNewChat() {
+  if (!canConfirmNewChat.value) return;
   if (newChatAgent.value === "hermes") {
     newChatLoading.value = true;
     try {
@@ -1391,7 +1400,7 @@ async function confirmNewChat() {
       const status = await fetchCodingAgentsStatus();
       const tool = status.tools.find((item) => item.id === agentId);
       if (!tool?.installed) {
-        const fallbackName = agentId === "codex" ? "Codex" : agentId === "pi" ? "Pi" : agentId === "grok" ? "Grok" : "Claude";
+        const fallbackName = newChatAgentOptions.value.find(option => option.value === agentId)?.label || agentId;
         message.warning(t("codingAgents.installRequired", { agent: tool?.name || fallbackName }));
         showNewChatModal.value = false;
         await router.push({ name: "hermes.agentManager" });
@@ -1417,7 +1426,7 @@ async function confirmNewChat() {
         ? "pi"
       : newChatAgent.value === "grok"
         ? "grok"
-      : newChatAgent.value === "opencode"
+      : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
         ? "opencode"
       : newChatAgent.value === "ekko-agent"
         ? "ekko-agent"
@@ -1430,6 +1439,7 @@ async function confirmNewChat() {
     agent,
     codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
     codingAgentMode: source === "coding_agent" ? codingAgentMode : undefined,
+    agentPreset: newChatAgent.value === "dsh" ? newChatAgentPreset.value : undefined,
     workspace: newChatWorkspace.value || null,
     workspaceExtraDirs: newChatExtraDirs.value.length ? [...newChatExtraDirs.value] : undefined,
     categoryId: newChatCategoryId.value,
@@ -1448,6 +1458,7 @@ async function confirmNewChat() {
     params: { sessionId: session.id },
   });
   showNewChatModal.value = false;
+  if (mobileQuery?.matches) showSessions.value = false;
 }
 
 function sessionProfile(sessionId: string): string | null {
@@ -2238,7 +2249,7 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "pi"
       : sessionModelSession.value?.agent === "grok"
         ? "grok"
-      : sessionModelSession.value?.agent === "opencode"
+      : sessionModelSession.value?.agent === "dsh" ? "dsh" : sessionModelSession.value?.agent === "opencode"
         ? "opencode"
       : sessionModelSession.value?.agent === "ekko-agent"
         ? "ekko-agent"
@@ -3165,6 +3176,10 @@ async function handleSessionModelCustomSubmit() {
               :disabled="newChatLoading"
             />
           </label>
+          <DshSessionPresetSelect
+            v-if="showNewChatModal && newChatAgent === 'dsh'"
+            v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
+          />
           <label v-if="isNewChatExternalCodingAgent" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
@@ -3595,6 +3610,7 @@ async function handleSessionModelCustomSubmit() {
                 />
                 <SubagentStreamPanel
                   v-else-if="selectedSubagent"
+                  :agent="chatSessionAgentAvatar(chatStore.activeSession)"
                   :stream="selectedSubagentStream"
                   @close="closeToolPanelOverlay"
                 />

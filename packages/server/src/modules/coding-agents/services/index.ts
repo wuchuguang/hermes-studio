@@ -1,12 +1,16 @@
+import { prepareDshRuntime, DSH_API_KEY_ENV } from './dsh/runtime-config'
+import { readDshMcpServers, validateDshSettings } from './dsh/config'
+import { createDshHost } from './dsh/host'
 import { OPENCODE_FREE_PROVIDER, openCodeFreeRuntime } from '../../studio/contracts/opencode-free'
 import { beginAgentPreparation } from './update-lock'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'crypto'
 import { existsSync, readdirSync, realpathSync } from 'fs'
 import { chmod, copyFile, cp, lstat, mkdir, open, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'fs/promises'
 import { homedir } from 'os'
 import { delimiter, dirname, join } from 'path'
 import { promisify } from 'util'
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml'
 import { getWebUiHome } from '../../studio/public/config'
 import { getProfileDir, PROVIDER_ENV_MAP, readConfigYamlForProfile, safeReadFile } from '../../studio/public/profile-config'
 import { getCompatibleCustomProviders } from '../../studio/contracts/provider-compat'
@@ -89,6 +93,7 @@ const HERMES_MCP_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
   { name: 'ekko-studio-browser', toolset: 'browser' },
   { name: 'ekko-studio-devices', toolset: 'devices' },
   { name: 'ekko-studio-use', toolset: 'use' },
+  { name: 'ekko-studio-plan', toolset: 'plan' },
 ]
 const HERMES_MCP_SERVER_NAMES: Set<string> = new Set(HERMES_MCP_SERVERS.map(server => server.name))
 const LEGACY_HERMES_MCP_SERVER_NAMES = new Set([
@@ -293,6 +298,7 @@ export interface CodingAgentConfigFileContent extends CodingAgentConfigFileDefin
 }
 
 export interface CodingAgentLaunchInput extends CodingAgentConfigScope {
+  agentPreset?: string
   mode?: 'scoped' | 'global'
   model?: string
   workspace?: string | null
@@ -376,6 +382,13 @@ const TOOL_DEFINITIONS: CodingAgentDefinition[] = [
     command: 'opencode',
     packageName: 'opencode-ai',
   },
+  {
+    id: 'dsh',
+    name: 'DeepSeek Harness',
+    provider: 'DeepSeek',
+    command: 'dsh',
+    packageName: '@deepseek-ai/dsh',
+  },
 ]
 
 const CONFIG_FILE_DEFINITIONS: Record<CodingAgentId, Array<Omit<CodingAgentConfigFileDefinition, 'absolutePath'> & { scopedPath: string }>> = {
@@ -402,6 +415,11 @@ const CONFIG_FILE_DEFINITIONS: Record<CodingAgentId, Array<Omit<CodingAgentConfi
     { key: 'mcp', path: '~/.grok/config.toml', scopedPath: 'config.toml', language: 'ini' },
     { key: 'settings', path: '~/.grok/config.toml', scopedPath: 'config.toml', language: 'ini' },
     { key: 'agents', path: '~/.grok/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
+  ],
+  dsh: [
+    { key: 'settings', path: '~/.dsh/settings.yaml', scopedPath: 'settings.yaml', language: 'yaml' },
+    { key: 'memory', path: '~/.dsh/AGENTS.md', scopedPath: 'AGENTS.md', language: 'markdown' },
+    { key: 'mcp', path: '~/.dsh/cordis.patch.yml', scopedPath: 'cordis.patch.yml', language: 'yaml' },
   ],
   opencode: [
     { key: 'settings', path: '~/.config/opencode/opencode.json', scopedPath: OPENCODE_CONFIG_FILE, language: 'json' },
@@ -854,10 +872,11 @@ function storedCodingAgentMode(session: HermesSessionRow | null): 'scoped' | 'gl
   return session?.provider === 'global' ? 'global' : 'scoped'
 }
 
-function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' {
+function persistedAgentId(id: string): 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' {
   if (id === 'codex') return 'codex'
   if (id === 'pi') return 'pi'
   if (id === 'grok') return 'grok'
+  if (id === 'dsh') return 'dsh'
   if (id === 'opencode') return 'opencode'
   return 'claude'
 }
@@ -893,7 +912,7 @@ function getScopedRuntimeConfigRoot(
   const rootDir = getScopedConfigRoot(id, scope)
   const sessionId = String(input.sessionId || '').trim()
   const agentSessionId = String(input.agentSessionId || '').trim()
-  if ((!sessionId || !agentSessionId) && id === 'pi') {
+  if ((!sessionId || !agentSessionId) && (id === 'pi' || id === 'dsh')) {
     const runtimeKey = createHash('sha256')
       .update(JSON.stringify([
         sessionId || randomUUID(),
@@ -1082,7 +1101,7 @@ async function activeGlobalCodexInstructions(sourceHome: string): Promise<string
   return await safeReadFile(join(sourceHome, 'AGENTS.md')) || ''
 }
 
-async function prepareGlobalCodexShadowHome(rootDir: string, systemPrompt: string): Promise<string> {
+async function prepareGlobalCodexShadowHome(rootDir: string, systemPrompt: string, profile: string): Promise<string> {
   const sourceHome = getGlobalCodexHome()
   await mkdir(rootDir, { recursive: true, mode: 0o700 })
 
@@ -1098,6 +1117,15 @@ async function prepareGlobalCodexShadowHome(rootDir: string, systemPrompt: strin
       }
     }
   }
+
+  const config = parseToml(await safeReadFile(join(sourceHome, 'config.toml')) || '')
+  const externalMcp = { ...(config.mcp_servers as Record<string, any> || {}) }
+  for (const [name, server] of Object.entries(externalMcp)) {
+    if (HERMES_MCP_SERVER_NAMES.has(name) || LEGACY_HERMES_MCP_SERVER_NAMES.has(name)
+      || server?.env?.[HERMES_MCP_MANAGED_ENV_KEY]) delete externalMcp[name]
+  }
+  config.mcp_servers = { ...externalMcp, ...getCodingAgentManagedMcpServerConfigs('codex', profile) } as any
+  await writeFile(join(rootDir, 'config.toml'), stringifyToml(config), { mode: 0o600 })
 
   const promptPath = join(rootDir, 'AGENTS.md')
   await writeManagedPromptFile(promptPath, systemPrompt, await activeGlobalCodexInstructions(sourceHome))
@@ -1579,6 +1607,23 @@ function piStudioRuntimeExtension(): string {
   ].join('\n')
 }
 
+async function prepareGlobalPiMcp(rootDir: string, profile: string) {
+  const settings = await readPiSettings()
+  const userProvidesAdapter = userSettingsProvidesPiMcpAdapter(settings)
+  if (!userProvidesAdapter && !existsSync(getPiMcpAdapterEntry())) await installBundledPiMcpAdapter()
+  const mcpPath = join(rootDir, 'mcp.json')
+  await writeFile(mcpPath, piMcpConfig(profile,
+    await safeReadFile(getLiveConfigFileDefinition('pi', 'mcp')?.absolutePath || ''),
+  ), { mode: 0o600 })
+  return {
+    file: { key: 'mcp', path: 'mcp.json', absolutePath: mcpPath },
+    args: [
+      ...(!userProvidesAdapter ? ['--extension', getPiMcpAdapterEntry()] : []),
+      '--mcp-config', mcpPath,
+    ],
+  }
+}
+
 const PI_RUNTIME_MCP_SETTINGS: Record<string, unknown> = {
   hostConfigDiscovery: 'off',
   toolPrefix: 'none',
@@ -1838,7 +1883,7 @@ export function getCodingAgentManagedMcpServerConfigs(
   id: CodingAgentId,
   profile = 'default',
 ): Record<string, Record<string, unknown>> {
-  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode'].includes(id)) return {}
+  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(id)) return {}
   const disabledManaged = getDisabledManagedMcpServers(id, profile)
   return Object.fromEntries(HERMES_MCP_SERVERS.map((item) => {
     const server = managedHermesMcpServerConfig(id, profile || 'default', item.name, item.toolset)
@@ -2645,6 +2690,12 @@ function commandExecution(command: string, args: string[]): CommandExecution {
   return { command: normalizedCommand, args }
 }
 
+const dshHost = createDshHost({ commandEnv, findCommandPaths, resolveCommandForExecution, commandExecution, getSourceHome: () => join(getGlobalConfigHome(), '.dsh') })
+export const getNativeDshPluginInventory = dshHost.getNativeDshPluginInventory
+export const dshPluginUi = dshHost.ui
+export const dshAgentPresets = dshHost.presets
+export const changeDshWebPlugins = dshHost.changePlugins
+
 function packageParts(packageName: string): string[] {
   return packageName.split('/').filter(Boolean)
 }
@@ -2725,7 +2776,7 @@ export function getCodingAgentDefinition(id: string): CodingAgentDefinition | nu
 }
 
 export function withCodingAgentRegistry(id: CodingAgentId, args: string[]): string[] {
-  return id === 'codex' || id === 'grok' || id === 'opencode'
+  return id === 'codex' || id === 'grok' || id === 'opencode' || id === 'dsh'
     ? [...args, `--registry=${OFFICIAL_NPM_REGISTRY}`]
     : [...args]
 }
@@ -2829,7 +2880,7 @@ export interface CodingAgentUpdateResult {
   message?: string
 }
 
-function versionGte(a: string, b: string): boolean {
+export function versionGte(a: string, b: string, includePrerelease = false): boolean {
   const x = String(a).match(/\d+(?:\.\d+){0,2}/)
   const y = String(b).match(/\d+(?:\.\d+){0,2}/)
   if (!x || !y) return String(a) === String(b)
@@ -2839,6 +2890,20 @@ function versionGte(a: string, b: string): boolean {
     const u = p[i] || 0
     const v = q[i] || 0
     if (u !== v) return u > v
+  }
+  if (includePrerelease) {
+    const prerelease = (version: string) => version.match(/\d+(?:\.\d+){0,2}-([0-9A-Za-z.-]+)/)?.[1].split('.')
+    const left = prerelease(a)
+    const right = prerelease(b)
+    if (!left || !right) return !left
+    for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+      if (left[i] === right[i]) continue
+      if (left[i] === undefined || right[i] === undefined) return right[i] === undefined
+      const ln = /^\d+$/.test(left[i])
+      const rn = /^\d+$/.test(right[i])
+      if (ln !== rn) return !ln
+      return ln ? Number(left[i]) > Number(right[i]) : left[i] > right[i]
+    }
   }
   return true
 }
@@ -2882,7 +2947,7 @@ export async function checkUpdateAgent(id: string): Promise<CodingAgentUpdateRes
     )
     const latestVersion = stdout.trim()
     const status = await getCodingAgentStatus(tool)
-    const updateAvailable = !!latestVersion && status.installed && !versionGte(status.version, latestVersion)
+    const updateAvailable = !!latestVersion && status.installed && !versionGte(status.version, latestVersion, id === 'dsh')
     return { success: true, tool: status, latestVersion, updateAvailable }
   } catch (err: any) {
     const status = await getCodingAgentStatus(tool)
@@ -3052,6 +3117,8 @@ export async function readCodingAgentConfigFile(id: string, key: string, scope: 
         ? piLiveConfigDefault(key, normalizedScope.profile) || ''
         : id === 'opencode' && key === 'settings'
           ? '{}\n'
+          : id === 'dsh' && key === 'settings' ? '{}\n'
+            : id === 'dsh' && key === 'mcp' ? '[]\n'
         : ''
     return {
       ...definition,
@@ -3075,6 +3142,8 @@ export async function writeCodingAgentConfigFile(id: string, key: string, conten
     ;(err as any).status = 404
     throw err
   }
+  if (id === 'dsh' && key === 'settings') validateDshSettings(content)
+  if (id === 'dsh' && key === 'mcp') readDshMcpServers(content)
   let persistedContent = content || ''
   if (id === 'grok' && (key === 'mcp' || key === 'settings')) {
     const existingContent = await safeReadFile(definition.absolutePath) || ''
@@ -3154,18 +3223,22 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       await mkdir(rootDir, { recursive: true })
       await writeFile(studioExtensionPath, piStudioRuntimeExtension(), 'utf-8')
       await writeFile(dynamicPromptPath, '', 'utf-8')
+      const mcp = await prepareGlobalPiMcp(rootDir, scope.profile)
       const files = [
         { key: 'studio_extension', path: PI_STUDIO_EXTENSION_FILE, absolutePath: studioExtensionPath },
         { key: 'dynamic_prompt', path: PI_DYNAMIC_PROMPT_FILE, absolutePath: dynamicPromptPath },
+        mcp.file,
       ]
       const env = {
         PI_CODING_AGENT_DIR: join(getGlobalConfigHome(), '.pi', 'agent'),
         HERMES_PI_DYNAMIC_PROMPT_FILE: dynamicPromptPath,
+        ...(input.sessionId ? { [HERMES_STUDIO_SESSION_ENV_KEY]: input.sessionId } : {}),
       }
       const args = [
         '--mode', 'rpc',
         ...(input.agentNativeSessionId ? ['--session-id', input.agentNativeSessionId] : []),
         '--extension', studioExtensionPath,
+        ...mcp.args,
         input.approveProjectConfig === true ? '--approve' : '--no-approve',
       ]
       const launcherPath = await writeLauncherScript({
@@ -3208,11 +3281,21 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     if (tool.id === 'claude-code') {
       promptFile = join(rootDir, 'hermes-rules.md')
       await writeManagedPromptFile(promptFile, systemPrompt, '')
-      files = [{ key: 'prompt', path: 'hermes-rules.md', absolutePath: promptFile }]
-      args = ['--append-system-prompt-file', promptFile, ...claudeCodePermissionArgs()]
+      const mcpPath = join(rootDir, 'mcp.json')
+      await writeFile(mcpPath, claudeMcpConfigJson(scope.profile,
+        await safeReadFile(getLiveConfigFileDefinition('claude-code', 'mcp')?.absolutePath || ''),
+      ), { mode: 0o600 })
+      files = [
+        { key: 'prompt', path: 'hermes-rules.md', absolutePath: promptFile },
+        { key: 'mcp', path: 'mcp.json', absolutePath: mcpPath },
+      ]
+      args = ['--append-system-prompt-file', promptFile, '--mcp-config', mcpPath, ...claudeCodePermissionArgs()]
     } else if (tool.id === 'codex') {
-      promptFile = await prepareGlobalCodexShadowHome(rootDir, systemPrompt)
-      files = [{ key: 'agents', path: 'AGENTS.md', absolutePath: promptFile }]
+      promptFile = await prepareGlobalCodexShadowHome(rootDir, systemPrompt, scope.profile)
+      files = [
+        { key: 'agents', path: 'AGENTS.md', absolutePath: promptFile },
+        { key: 'config', path: 'config.toml', absolutePath: join(rootDir, 'config.toml') },
+      ]
       env = { CODEX_HOME: rootDir }
     } else if (tool.id === 'grok') {
       const prepared = await prepareGlobalGrokRuntime({
@@ -3225,6 +3308,16 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       files = prepared.files
       env = { GROK_HOME: rootDir }
       args = ['--always-approve', '--no-auto-update']
+    } else if (tool.id === 'dsh') {
+      const prepared = await prepareDshRuntime({
+        ...await dshHost.runtimeInput(),
+        sharedSkills: join(getGlobalConfigHome(), '.agents', 'skills'),
+        rootDir, systemPrompt, managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile),
+      })
+      promptFile = prepared.promptFile
+      files = prepared.files
+      args = prepared.args
+      env = prepared.env
     } else if (tool.id === 'opencode') {
       const prepared = await ensureOpenCodeScopedBaseConfigFiles(scope, systemPrompt, workspaceDir)
       // Share native configuration, but keep each conversation's dynamic
@@ -3259,6 +3352,12 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       await writeManagedPromptFile(promptFile, systemPrompt, '')
       files = [{ key: 'prompt', path: 'APPEND_SYSTEM.md', absolutePath: promptFile }]
       args = ['--append-system-prompt', promptFile]
+      if (tool.id === 'pi') {
+        const mcp = await prepareGlobalPiMcp(rootDir, scope.profile)
+        files.push(mcp.file)
+        args.push(...mcp.args)
+        env = { PI_CODING_AGENT_DIR: join(getGlobalConfigHome(), '.pi', 'agent') }
+      }
     }
     const chatSessionId = String(input.sessionId || '').trim()
     if (chatSessionId) env[HERMES_STUDIO_SESSION_ENV_KEY] = chatSessionId
@@ -3303,7 +3402,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
   const reasoningEffort = String(input.reasoningEffort || '').trim()
   const groupSystemPrompt = String(input.groupSystemPrompt || '').trim()
   const scopedSystemPrompt = tool.id === 'pi' && groupSystemPrompt ? getSystemPrompt() : groupSystemPrompt || getSystemPrompt()
-  const isolatedInput = tool.id === 'pi'
+  const isolatedInput = tool.id === 'pi' || tool.id === 'dsh'
     ? {
         ...input,
         sessionId: input.sessionId || randomUUID(),
@@ -3634,6 +3733,24 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
       '--no-auto-update',
       ...(reasoningEffort ? ['--reasoning-effort', reasoningEffort] : []),
     ]
+  } else if (tool.id === 'dsh') {
+    const proxyTarget = registerCodexProxyTarget({
+      profile: scope.profile, provider, model, baseUrl, apiKey, apiMode, reasoningEffort,
+      agentId: tool.id, agentSessionId: isolatedInput.agentSessionId, chatSessionId: isolatedInput.sessionId,
+    })
+    const capabilities = getModelRuntimeCapabilities({ profile: scope.profile, provider, model })
+    const prepared = await prepareDshRuntime({
+      ...await dshHost.runtimeInput(),
+      sharedSkills: join(getGlobalConfigHome(), '.agents', 'skills'),
+      rootDir, systemPrompt: scopedSystemPrompt, model, baseUrl: proxyTarget.baseUrl,
+      contextWindow: capabilities.contextWindow, outputLimit: capabilities.outputLimit,
+      imageInput: capabilities.input.includes('image'),
+      reasoningEffort,
+      managedMcp: getCodingAgentManagedMcpServerConfigs('dsh', scope.profile),
+    })
+    files.push(...prepared.files)
+    args = prepared.args
+    env = { ...prepared.env, [DSH_API_KEY_ENV]: proxyTarget.token }
   } else {
     const proxyTarget = baseUrl && (apiKey || freeRuntime)
       ? registerCodexProxyTarget({
@@ -3711,7 +3828,7 @@ export async function prepareCodingAgentLaunch(id: string, input: CodingAgentLau
     files,
     promptFile: tool.id === 'claude-code'
       ? join(rootDir, 'hermes-rules.md')
-      : tool.id === 'grok'
+      : tool.id === 'grok' || tool.id === 'dsh'
         ? join(rootDir, 'AGENTS.md')
         : tool.id === 'opencode'
           ? join(rootDir, 'AGENTS.md')
@@ -3737,6 +3854,7 @@ async function startCodingAgentRunInternal(
     throw err
   }
   const existingSession = getSession(sessionId)
+  const agentPreset = id === 'dsh' ? await dshHost.presets.forSession(input.agentPreset, existingSession?.agent_preset) : undefined
   const sessionSource = input.sessionSource === 'global_agent'
     ? 'global_agent'
     : input.sessionSource === 'group_chat'
@@ -3775,7 +3893,7 @@ async function startCodingAgentRunInternal(
     piOutputMode: id === 'pi' ? 'rpc' : undefined,
   })
   const launchExtraDirs = normalizeExtraDirs(resolvedInput.extraDirs, launch.workspaceDir)
-  const runtimeMcpFile = launch.files.find(file => file.key === (id === 'codex' || id === 'grok' || id === 'opencode' ? 'config' : 'mcp'))
+  const runtimeMcpFile = launch.files.find(file => file.key === (id === 'dsh' ? 'cordis.patch.yml' : id === 'codex' || id === 'grok' || id === 'opencode' ? 'config' : 'mcp'))
   const runtimeMcpPath = runtimeMcpFile?.absolutePath
     || (id === 'codex' || id === 'grok' || id === 'opencode'
       ? join(launch.rootDir, id === 'opencode' ? OPENCODE_CONFIG_FILE : 'config.toml')
@@ -3789,12 +3907,10 @@ async function startCodingAgentRunInternal(
       logger.warn({ err, agentId: id, runtimeMcpPath }, '[coding-agent-mcp] runtime isolation failed open')
     }
   }
-  const commandExecutionEnv = process.platform === 'win32'
-    ? {
-        ...(await commandEnv()),
-        ...launch.env,
-      }
-    : launch.env
+  const commandExecutionEnv = {
+    ...(await commandEnv()),
+    ...launch.env,
+  }
   const runtimeCommand = process.platform === 'win32'
     ? await resolveCommandForExecution(launch.command, commandExecutionEnv)
     : launch.command
@@ -3820,6 +3936,7 @@ async function startCodingAgentRunInternal(
     promptFile: launch.promptFile,
     state,
     reasoningEffort: launch.reasoningEffort,
+    agentPreset,
     sessionSource: sessionSource === 'global_agent' || sessionSource === 'workflow' || sessionSource === 'group_chat'
       ? sessionSource
       : undefined,
@@ -3828,6 +3945,7 @@ async function startCodingAgentRunInternal(
     source: sessionSource,
     agent: persistedAgentId(launch.agentId),
     agent_mode: launch.mode,
+    ...(agentPreset ? { agent_preset: agentPreset } : {}),
     agent_session_id: agentSessionId,
     agent_native_session_id: agentNativeSessionId,
     model: launch.model,
@@ -3875,7 +3993,7 @@ export async function compactStoredCodingAgentSession(
     isolateSettings: true,
   })
   const launchEnv = {
-    ...process.env,
+    ...(await commandEnv()),
     ...launch.env,
   }
   const command = process.platform === 'win32'
