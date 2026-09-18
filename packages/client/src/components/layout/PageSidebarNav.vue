@@ -34,11 +34,6 @@ function openHistory() {
   void router.push({ name: 'hermes.history' })
 }
 
-function openConnections() {
-  if (props.active === 'connections') return
-  void router.push({ name: 'hermes.connections' })
-}
-
 function openAgentManager() {
   if (props.active === 'agents') return
   void router.push({ name: 'hermes.agentManager' })
@@ -98,31 +93,6 @@ function openWorkflow() {
       </button>
     </div>
     <div class="page-sidebar-tabs" role="tablist" aria-label="Chat actions">
-      <button
-        class="page-sidebar-tab"
-        :class="{ active: active === 'connections' }"
-        type="button"
-        :aria-current="active === 'connections' ? 'page' : undefined"
-        @click="openConnections"
-      >
-        <svg
-          width="15"
-          height="15"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="18" cy="5" r="2.5" />
-          <circle cx="6" cy="12" r="2.5" />
-          <circle cx="18" cy="19" r="2.5" />
-          <path d="m8.2 10.7 7.6-4.4M8.2 13.3l7.6 4.4" />
-        </svg>
-        <span>{{ t('sidebar.connections') }}</span>
-      </button>
       <button
         v-if="canManageAgents"
         class="page-sidebar-tab"
