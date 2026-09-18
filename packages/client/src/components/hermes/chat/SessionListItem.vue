@@ -48,6 +48,20 @@ const profileModelsMissing = computed(() =>
   appStore.profileModelGroups.length > 0 && !profileHasModels.value,
 )
 const isGlobalAgentSession = computed(() => props.session.source === 'global_agent')
+const usageLabel = computed(() => {
+  const parts: string[] = []
+  const total = (props.session.inputTokens || 0) + (props.session.outputTokens || 0)
+  if (total > 0) {
+    parts.push(total >= 1_000_000
+      ? `${(total / 1_000_000).toFixed(1)}M tok`
+      : total >= 1000
+        ? `${Math.round(total / 1000)}k tok`
+        : `${total} tok`)
+  }
+  const cost = (props.session as unknown as { estimatedCostUsd?: number }).estimatedCostUsd
+  if (cost && cost >= 0.01) parts.push(`$${cost.toFixed(2)}`)
+  return parts.join(' · ')
+})
 const sessionAgentLogo = computed(() => chatSessionAgentAvatar(props.session))
 
 let longPressTimer: ReturnType<typeof setTimeout> | null = null
@@ -144,6 +158,7 @@ onUnmounted(() => {
           </NTooltip>
         </span>
         <span class="session-item-time">{{ formatTimestampMs(session.createdAt) }}</span>
+          <span v-if="usageLabel" class="session-item-usage">{{ usageLabel }}</span>
       </span>
       <span class="session-item-agent-row">
         <span class="session-item-agent-logo-wrap" :class="{ streaming }">
@@ -247,7 +262,15 @@ onUnmounted(() => {
 
 .session-item.missing-models .session-item-title,
 .session-item.missing-models .session-item-profile-name,
-.session-item.missing-models .session-item-time {
+.session-item.missing-models .session-item-usage {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.45;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+
+.session-item-time {
   color: #b42318;
 }
 
@@ -302,6 +325,14 @@ onUnmounted(() => {
   border-radius: 50%;
   background: var(--accent-primary);
   box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.12);
+}
+
+.session-item-usage {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.45;
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
 }
 
 .session-item-time {
