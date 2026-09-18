@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { searchWorkspaceDirs } from '@/api/studio/sessions'
+import { useDefaultWorkspace } from '@/composables/useDefaultWorkspace'
 
 /**
  * Primary-directory picker: search by name, inline results, selected-path
@@ -23,6 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { recordWorkspaceUsage } = useDefaultWorkspace('default')
 const selectedPath = ref(props.modelValue || '')
 
 watch(() => props.modelValue, (v) => { selectedPath.value = v || '' })
@@ -45,9 +47,18 @@ const searchDone = ref(false)
 let searchSeq = 0
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 
+function hasCjk(s: string): boolean {
+  return /[\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/.test(s)
+}
+
+function meetsMinQuery(value: string): boolean {
+  const v = value.trim()
+  return v.length >= 2 || (v.length >= 1 && hasCjk(v))
+}
+
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
-  if (!searchQuery.value || searchQuery.value.trim().length < 2) {
+  if (!searchQuery.value || !meetsMinQuery(searchQuery.value)) {
     searchHits.value = []
     searchDone.value = false
     return
@@ -56,13 +67,33 @@ function onSearchInput() {
   searchTimer = setTimeout(() => void runDirSearch(q), 250)
 }
 
+let recentEntriesCache: Array<{ path: string; lastUsed: number; useCount: number }> | null = null
+function recentEntries() {
+  if (!recentEntriesCache) {
+    recentEntriesCache = useDefaultWorkspace('default').loadRecentWorkspaces()
+  }
+  return recentEntriesCache
+}
+
+function applyFrecency(found: Array<{ path: string; name: string }>) {
+  const recents = new Map(recentEntries().map((w, i) => [w.path, i]))
+  return [...found].sort((a, b) => {
+    const ra = recents.get(a.path)
+    const rb = recents.get(b.path)
+    if (ra !== undefined || rb !== undefined) {
+      return (ra ?? Number.MAX_SAFE_INTEGER) - (rb ?? Number.MAX_SAFE_INTEGER)
+    }
+    return 0
+  })
+}
+
 async function runDirSearch(q: string) {
   const seq = ++searchSeq
   searchSearching.value = true
   try {
     const found = await searchWorkspaceDirs(q)
     if (seq !== searchSeq) return
-    searchHits.value = found
+    searchHits.value = applyFrecency(found)
     searchDone.value = true
   } finally {
     if (seq === searchSeq) searchSearching.value = false
@@ -71,6 +102,7 @@ async function runDirSearch(q: string) {
 
 function pickSearchHit(path: string) {
   updateSelectedPath(path)
+  recordWorkspaceUsage(path)
   searchQuery.value = ''
   searchHits.value = []
   searchDone.value = false
@@ -89,7 +121,7 @@ function pickSearchHit(path: string) {
       @keydown.enter.prevent="() => { if (searchHits.length) pickSearchHit(searchHits[0].path) }"
     >
     <div v-if="searchSearching" class="folder-search-status">{{ t('chat.dirSearchSearching') }}</div>
-    <div v-else-if="searchQuery.trim().length >= 2 && searchDone && !searchHits.length" class="folder-search-status">
+    <div v-else-if="meetsMinQuery(searchQuery) && searchDone && !searchHits.length" class="folder-search-status">
       {{ t('chat.dirSearchNoResults') }}
     </div>
     <div v-if="searchHits.length" class="folder-search-results">

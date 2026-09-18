@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { searchWorkspaceDirs } from '@/api/studio/sessions'
+import { useDefaultWorkspace } from '@/composables/useDefaultWorkspace'
 
 /**
  * Searchable directory picker for extra workspace dirs.
@@ -10,6 +11,9 @@ import { searchWorkspaceDirs } from '@/api/studio/sessions'
  * binder-positioned dropdowns flicker closed or misposition, which read
  * as "search does nothing". Results render inline below the input, in
  * normal document flow — keyboard-proof on both platforms.
+ *
+ * Results are frecency-ranked (recently/frequently used workspaces first)
+ * and CJK queries match from a single character.
  */
 const props = defineProps<{
   modelValue: string[]
@@ -17,6 +21,8 @@ const props = defineProps<{
   hideChips?: boolean
 }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string[]] }>()
+
+const { recordWorkspaceUsage } = useDefaultWorkspace('default')
 
 const input = ref('')
 const hits = ref<Array<{ path: string; name: string }>>([])
@@ -29,13 +35,45 @@ function removeDir(dir: string) {
   emit('update:modelValue', props.modelValue.filter((d) => d !== dir))
 }
 
+function hasCjk(s: string): boolean {
+  return /[\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]/.test(s)
+}
+
+function meetsMinQuery(value: string): boolean {
+  const v = value.trim()
+  return v.length >= 2 || (v.length >= 1 && hasCjk(v))
+}
+
+/** Frecently-used workspaces first, keeping the API's startswith order. */
+function applyFrecency(found: Array<{ path: string; name: string }>) {
+  const recents = new Map(
+    recentEntries().map((w, i) => [w.path, i]),
+  )
+  return [...found].sort((a, b) => {
+    const ra = recents.get(a.path)
+    const rb = recents.get(b.path)
+    if (ra !== undefined || rb !== undefined) {
+      return (ra ?? Number.MAX_SAFE_INTEGER) - (rb ?? Number.MAX_SAFE_INTEGER)
+    }
+    return 0
+  })
+}
+
+let recentEntriesCache: Array<{ path: string; lastUsed: number; useCount: number }> | null = null
+function recentEntries() {
+  if (!recentEntriesCache) {
+    recentEntriesCache = useDefaultWorkspace('default').loadRecentWorkspaces()
+  }
+  return recentEntriesCache
+}
+
 async function runSearch(q: string) {
   const seq = ++searchSeq
   searching.value = true
   try {
     const found = await searchWorkspaceDirs(q)
     if (seq !== searchSeq) return
-    hits.value = found.filter((h) => !props.modelValue.includes(h.path))
+    hits.value = applyFrecency(found.filter((h) => !props.modelValue.includes(h.path)))
     searched.value = true
   } finally {
     if (seq === searchSeq) searching.value = false
@@ -45,7 +83,7 @@ async function runSearch(q: string) {
 function onInput() {
   const value = input.value
   if (searchTimer) clearTimeout(searchTimer)
-  if (!value || value.trim().length < 2) {
+  if (!value || !meetsMinQuery(value)) {
     hits.value = []
     searched.value = false
     return
@@ -56,6 +94,7 @@ function onInput() {
 function pick(path: string) {
   if (!props.modelValue.includes(path)) {
     emit('update:modelValue', [...props.modelValue, path])
+    recordWorkspaceUsage(path)
   }
   input.value = ''
   hits.value = []
@@ -75,7 +114,7 @@ function pick(path: string) {
       @keydown.enter.prevent="() => { if (hits.length) pick(hits[0].path) }"
     >
     <div v-if="searching" class="dir-search-status">{{ $t('chat.dirSearchSearching') }}</div>
-    <div v-else-if="input.trim().length >= 2 && searched && !hits.length" class="dir-search-status">
+    <div v-else-if="meetsMinQuery(input) && searched && !hits.length" class="dir-search-status">
       {{ $t('chat.dirSearchNoResults') }}
     </div>
     <div v-if="hits.length" class="dir-search-results">
