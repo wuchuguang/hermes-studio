@@ -4,6 +4,7 @@ import { NButton, NDropdown, NInput, NModal, NSpace, NSpin, useDialog, useMessag
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api/client'
 import { copyToClipboard } from '@/utils/clipboard'
+import { searchWorkspaceDirs } from '@/api/studio/sessions'
 
 interface FolderEntry {
   name: string
@@ -141,6 +142,47 @@ function selectFolder(folder: FolderEntry) {
 
 function selectBase() {
   updateSelectedPath(basePath.value)
+}
+
+// ── Search-by-name mode (inline results; iOS-keyboard-proof, same as DirSearchPicker) ──
+const searchQuery = ref('')
+const searchHits = ref<Array<{ path: string; name: string }>>([])
+const searchSearching = ref(false)
+const searchDone = ref(false)
+let searchSeq = 0
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+const searchMode = computed(() => searchQuery.value.trim().length >= 2)
+
+function onSearchInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (!searchMode.value) {
+    searchHits.value = []
+    searchDone.value = false
+    return
+  }
+  const q = searchQuery.value
+  searchTimer = setTimeout(() => void runDirSearch(q), 250)
+}
+
+async function runDirSearch(q: string) {
+  const seq = ++searchSeq
+  searchSearching.value = true
+  try {
+    const found = await searchWorkspaceDirs(q)
+    if (seq !== searchSeq) return
+    searchHits.value = found
+    searchDone.value = true
+  } finally {
+    if (seq === searchSeq) searchSearching.value = false
+  }
+}
+
+function pickSearchHit(path: string) {
+  updateSelectedPath(path)
+  searchQuery.value = ''
+  searchHits.value = []
+  searchDone.value = false
 }
 
 async function openFolder(folder: FolderEntry | null) {
@@ -310,6 +352,32 @@ const flatNodes = computed<FlatNode[]>(() => {
 
 <template>
   <div class="folder-picker">
+    <input
+      v-model="searchQuery"
+      class="folder-search-input"
+      type="text"
+      :placeholder="t('chat.dirSearchPlaceholder')"
+      enterkeyhint="search"
+      @input="onSearchInput"
+      @keydown.enter.prevent="() => { if (searchHits.length) pickSearchHit(searchHits[0].path) }"
+    >
+    <div v-if="searchSearching" class="folder-search-status">{{ t('chat.dirSearchSearching') }}</div>
+    <div v-else-if="searchMode && searchDone && !searchHits.length" class="folder-search-status">
+      {{ t('chat.dirSearchNoResults') }}
+    </div>
+    <div v-if="searchHits.length" class="folder-search-results">
+      <button
+        v-for="h in searchHits"
+        :key="h.path"
+        type="button"
+        class="folder-search-hit"
+        @click="pickSearchHit(h.path)"
+      >
+        <span class="folder-hit-name">{{ h.name }}</span>
+        <span class="folder-hit-path">{{ h.path }}</span>
+      </button>
+    </div>
+    <template v-if="!searchMode">
     <NInput
       :value="selectedPath"
       :placeholder="t('chat.workspacePlaceholder')"
@@ -367,6 +435,7 @@ const flatNodes = computed<FlatNode[]>(() => {
         {{ t('chat.folderPickerNoFolders') }}
       </div>
     </div>
+    </template>
 
     <!-- Selected path display -->
     <div v-if="selectedPath" class="folder-selected">
@@ -423,6 +492,74 @@ const flatNodes = computed<FlatNode[]>(() => {
 </template>
 
 <style scoped lang="scss">
+.folder-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 6px;
+}
+
+.folder-search-input:focus {
+  border-color: var(--accent, rgba(96, 165, 250, 0.6));
+}
+
+.folder-search-status {
+  font-size: 12px;
+  opacity: 0.6;
+  padding: 2px 0;
+}
+
+.folder-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+
+.folder-search-hit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.folder-search-hit:active {
+  background: rgba(128, 128, 128, 0.15);
+}
+
+.folder-hit-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.folder-hit-path {
+  opacity: 0.55;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  align-self: stretch;
+}
+
 .folder-picker {
   max-height: 360px;
   border: 1px solid rgba(255, 255, 255, 0.1);
