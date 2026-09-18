@@ -1141,6 +1141,8 @@ export default {
     workspaceProjectPlaceholder: '綁定專案：自動填主目錄+附加目錄',
     workspaceProjectEmpty: '暫無 hermes 專案 — 用 `hermes project create` 建立',
     dirSearchPlaceholder: '按名稱搜尋目錄（至少 2 字元），點擊選中',
+    dirSearchSearching: '搜尋中…',
+    dirSearchNoResults: '沒有符合的目錄',
     dirSearchToggle: '搜尋目錄',
     workspaceExtraAdd: '新增目錄',
     workspaceExtraEmpty: '暫無。agent 只能訪問主工作區。',

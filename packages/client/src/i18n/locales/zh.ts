@@ -1150,6 +1150,8 @@ export default {
     workspaceProjectPlaceholder: '绑定项目：自动填主目录+附加目录',
     workspaceProjectEmpty: '暂无 hermes 项目 — 用 `hermes project create` 创建',
     dirSearchPlaceholder: '按名称搜索目录（至少 2 字符），点击选中',
+    dirSearchSearching: '搜索中…',
+    dirSearchNoResults: '没有匹配的目录',
     dirSearchToggle: '搜索目录',
     workspaceExtraAdd: '添加目录',
     workspaceExtraEmpty: '暂无。agent 只能访问主工作区。',

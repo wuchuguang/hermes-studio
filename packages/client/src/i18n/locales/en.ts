@@ -1150,6 +1150,8 @@ export default {
     workspaceProjectPlaceholder: 'Bind a project: fills main + extra dirs',
     workspaceProjectEmpty: 'No hermes projects yet — create with `hermes project create`',
     dirSearchPlaceholder: 'Search directories by name (>= 2 chars), Enter to pick',
+    dirSearchSearching: 'Searching…',
+    dirSearchNoResults: 'No matching directories',
     dirSearchToggle: 'Search dir',
     workspaceExtraAdd: 'Add directory',
     workspaceExtraEmpty: 'None. The agent can only access the main workspace.',
