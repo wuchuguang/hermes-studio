@@ -900,6 +900,21 @@ async function handleNewChatProjectChange(slug: string | null) {
   newChatExtraDirs.value = paths.filter((d) => d !== primary);
 }
 
+// Auto-bind new-chat primary dir to a registered project on USER pick/edit:
+// matching primary_path pulls in the project's extra dirs + dropdown reflect.
+function handleNewChatPrimaryChange() {
+  const primary = (newChatWorkspace.value || "").trim();
+  newChatProjectSlug.value = null;
+  if (!primary) return;
+  const project = workspaceProjects.value.find(
+    (p) => (p.primary_path || p.folders.find((f) => f.is_primary)?.path) === primary,
+  );
+  if (!project) return;
+  const paths = project.folders.map((f) => f.path);
+  newChatProjectSlug.value = project.slug;
+  newChatExtraDirs.value = [...new Set(paths.filter((d) => d !== primary))];
+}
+
 async function handleNewChatCategoryChange(value: string | number | null) {
   if (value === null || value === 0) {
     newChatCategoryId.value = null;
@@ -2166,6 +2181,27 @@ function handleProjectSelected(slug: string | null) {
   workspaceValue.value = primary;
   workspaceExtraDirs.value = paths.filter((d) => d !== primary);
 }
+
+// Auto-bind: when the USER picks/edits the primary dir (not on modal open —
+// that would clobber session-specific extra edits), and the new primary
+// matches a registered project's primary_path, pull in its extra dirs and
+// reflect the binding in the project dropdown.
+function syncWorkspaceProjectBinding() {
+  const primary = (workspaceValue.value || "").trim();
+  selectedProjectSlug.value = null;
+  if (!primary) return;
+  const project = workspaceProjects.value.find(
+    (p) => (p.primary_path || p.folders.find((f) => f.is_primary)?.path) === primary,
+  );
+  if (!project) return;
+  const paths = project.folders.map((f) => f.path);
+  selectedProjectSlug.value = project.slug;
+  workspaceExtraDirs.value = [...new Set(paths.filter((d) => d !== primary))];
+}
+
+function handleWorkspacePrimaryChange() {
+  syncWorkspaceProjectBinding();
+}
 // ---------------------------------------------------------------------------
 
 function handleWorkspaceExtraAdd(dir: string | null) {
@@ -2926,7 +2962,7 @@ async function handleSessionModelCustomSubmit() {
             @update:value="handleProjectSelected"
           />
         </div>
-        <FolderPicker v-model="workspaceValue" />
+        <FolderPicker v-model="workspaceValue" @update:model-value="handleWorkspacePrimaryChange" />
         <div class="workspace-extra-section">
           <div class="workspace-extra-header">
             <span class="workspace-extra-title">{{ t('chat.workspaceExtraDirs') }}</span>
@@ -3338,6 +3374,7 @@ async function handleSessionModelCustomSubmit() {
               :favorite-disabled="!newChatWorkspace"
               :favorite-title="isCurrentWorkspaceDefault ? t('chat.workspaceUnpin') : t('chat.workspacePin')"
               @toggle-favorite="handleToggleDefaultWorkspace"
+              @update:model-value="handleNewChatPrimaryChange"
             />
             <div v-if="newChatExtraDirs.length" class="workspace-extra-list new-chat-extra-list">
               <div v-for="dir in newChatExtraDirs" :key="dir" class="workspace-extra-item">
