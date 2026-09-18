@@ -1152,6 +1152,8 @@ export default {
     dirSearchPlaceholder: '按名称搜索目录（至少 2 字符），点击选中',
     dirSearchSearching: '搜索中…',
     dirSearchNoResults: '没有匹配的目录',
+    buildRefreshAvailable: '有新版本可用',
+    buildRefreshReload: '刷新',
     dirSearchToggle: '搜索目录',
     workspaceExtraAdd: '添加目录',
     workspaceExtraEmpty: '暂无。agent 只能访问主工作区。',

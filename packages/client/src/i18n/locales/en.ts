@@ -1152,6 +1152,8 @@ export default {
     dirSearchPlaceholder: 'Search directories by name (>= 2 chars), Enter to pick',
     dirSearchSearching: 'Searching…',
     dirSearchNoResults: 'No matching directories',
+    buildRefreshAvailable: 'New version available',
+    buildRefreshReload: 'Refresh',
     dirSearchToggle: 'Search dir',
     workspaceExtraAdd: 'Add directory',
     workspaceExtraEmpty: 'None. The agent can only access the main workspace.',

@@ -24,11 +24,16 @@ import { watchServerTtsSettingsHydration } from "@/composables/useTtsSettingsHyd
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
 import { isStoredSuperAdmin } from "@/api/client";
+import {
+  useClientBuildRefresh,
+} from "@/composables/useClientBuildRefresh";
 import AuthEventListener from "@/components/auth/AuthEventListener.vue";
 import { desktopBridge } from "@/utils/desktop-bridge";
 import { naiveLocaleFor } from "@/constants/naiveLocale";
 import { naiveRtlFor } from "@/constants/naiveRtl";
 
+const { newBuildAvailable, reload: reloadForNewBuild } =
+  useClientBuildRefresh();
 const AppSidebar = defineAsyncComponent(
   async () => (await import("@/components/layout/AppSidebar.vue")).default,
 );
@@ -284,6 +289,15 @@ useKeyboard();
                 })
               }}
             </div>
+            <button
+              v-if="newBuildAvailable"
+              class="build-refresh-pill"
+              type="button"
+              @click="reloadForNewBuild"
+            >
+              {{ t("chat.buildRefreshAvailable") }} ·
+              {{ t("chat.buildRefreshReload") }}
+            </button>
             <div
               class="app-layout"
               :class="{
@@ -678,5 +692,25 @@ useKeyboard();
   border-bottom: 1px solid #fde68a;
   text-align: center;
   line-height: 1.4;
+}
+
+.build-refresh-pill {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: 12px;
+  z-index: 3000;
+  border: none;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent, #3b82f6);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.build-refresh-pill:active {
+  opacity: 0.85;
 }
 </style>

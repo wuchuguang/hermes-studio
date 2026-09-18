@@ -1143,6 +1143,8 @@ export default {
     dirSearchPlaceholder: '按名稱搜尋目錄（至少 2 字元），點擊選中',
     dirSearchSearching: '搜尋中…',
     dirSearchNoResults: '沒有符合的目錄',
+    buildRefreshAvailable: '有新版本可用',
+    buildRefreshReload: '重新整理',
     dirSearchToggle: '搜尋目錄',
     workspaceExtraAdd: '新增目錄',
     workspaceExtraEmpty: '暫無。agent 只能訪問主工作區。',
