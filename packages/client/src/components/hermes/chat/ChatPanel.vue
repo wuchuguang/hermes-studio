@@ -2134,8 +2134,6 @@ const showWorkspaceModal = ref(false);
 const workspaceValue = ref("");
 const workspaceSessionId = ref<string | null>(null);
 const workspaceExtraDirs = ref<string[]>([]);
-const workspaceExtraPicking = ref<'' | 'browse' | 'search'>("");
-const workspaceExtraPending = ref("");
 
 function openActiveSessionWorkspace() {
   const session = chatStore.activeSession;
@@ -2203,16 +2201,6 @@ function handleWorkspacePrimaryChange() {
   syncWorkspaceProjectBinding();
 }
 // ---------------------------------------------------------------------------
-
-function handleWorkspaceExtraAdd(dir: string | null) {
-  const value = String(dir || "").trim();
-  workspaceExtraPicking.value = "";
-  workspaceExtraPending.value = "";
-  if (!value) return;
-  if (value === (workspaceValue.value || "").trim()) return;
-  if (workspaceExtraDirs.value.includes(value)) return;
-  workspaceExtraDirs.value = [...workspaceExtraDirs.value, value];
-}
 
 function handleWorkspaceExtraRemove(dir: string) {
   workspaceExtraDirs.value = workspaceExtraDirs.value.filter((d) => d !== dir);
@@ -2966,33 +2954,8 @@ async function handleSessionModelCustomSubmit() {
         <div class="workspace-extra-section">
           <div class="workspace-extra-header">
             <span class="workspace-extra-title">{{ t('chat.workspaceExtraDirs') }}</span>
-            <div class="workspace-extra-actions">
-              <NButton
-                size="tiny"
-                quaternary
-                :type="workspaceExtraPicking === 'search' ? 'primary' : 'default'"
-                @click="workspaceExtraPicking = workspaceExtraPicking === 'search' ? '' : 'search'"
-              >
-                {{ t('chat.dirSearchToggle') }}
-              </NButton>
-              <NButton
-                size="tiny"
-                quaternary
-                :type="workspaceExtraPicking === 'browse' ? 'primary' : 'default'"
-                @click="workspaceExtraPicking = workspaceExtraPicking === 'browse' ? '' : 'browse'"
-              >
-                {{ t('chat.workspaceExtraAdd') }}
-              </NButton>
-            </div>
           </div>
-          <FolderPicker
-            v-if="workspaceExtraPicking === 'browse'"
-            v-model="workspaceExtraPending"
-            class="workspace-extra-picker"
-            @update:model-value="handleWorkspaceExtraAdd"
-          />
           <DirSearchPicker
-            v-else-if="workspaceExtraPicking === 'search'"
             :model-value="workspaceExtraDirs"
             hide-chips
             class="workspace-extra-picker"
