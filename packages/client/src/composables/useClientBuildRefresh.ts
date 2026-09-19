@@ -15,7 +15,7 @@ export function useClientBuildRefresh(intervalMs = 120_000) {
 
   async function check() {
     try {
-      const res = await request<{ buildId?: string }>('/api/health/client-build-id')
+      const res = await request<{ buildId?: string }>('/client-build-id')
       const id = res?.buildId
       if (!id || id === 'unknown') return
       if (currentId === null) {
