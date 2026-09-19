@@ -11,6 +11,7 @@ import { useSettingsStore } from '@/stores/hermes/settings'
 import { copyToClipboard } from '@/utils/clipboard'
 import { playCompletionSound } from '@/utils/completion-sound'
 import { showSystemNotification } from '@/utils/completion-notification'
+import { setAppBadgeSafely, clearAppBadgeSafely } from '@/utils/app-badge'
 import { workflowApprovalKey } from '@/utils/workflow-approval-key'
 import { PENDING_INTERACTION_EXPIRED_EVENT } from '@/utils/pending-interaction'
 import { approveWorkflowNode, type WorkflowRecord } from '@/api/studio/workflows'
@@ -431,7 +432,12 @@ watch(pendingSoundActionKeys, keys => {
     }
   }
   pendingBaselineEstablished = true
-  if (hasNewAction && approvalSoundArmed && settingsStore.display.approval_bell) void playCompletionSound()
+  if (hasNewAction) {
+    // Attention marker for the PWA icon while backgrounded/away.
+    setAppBadgeSafely()
+    if (approvalSoundArmed && settingsStore.display.approval_bell) void playCompletionSound()
+  }
+  if (keys.length === 0) clearAppBadgeSafely()
 }, { immediate: true })
 
 watch(pendingActions, actions => {
