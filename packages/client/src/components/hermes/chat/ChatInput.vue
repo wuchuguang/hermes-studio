@@ -19,6 +19,7 @@ import BundleCreateModal from './BundleCreateModal.vue'
 import { BRIDGE_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
 import { clampChatInputHeight, isMobileChatInputViewport } from '@/utils/chat-input-height'
 import { normalizeComposerVoiceTranscript, useComposerVoiceInput } from '@/composables/useComposerVoiceInput'
+import { useBrowserSpeechRecognition } from '@/composables/useBrowserSpeechRecognition'
 import { extractRepresentativeVideoFrames, isVideoFile } from '@/utils/video-frame-extraction'
 import ImagePreviewOverlay from './ImagePreviewOverlay.vue'
 
@@ -194,6 +195,43 @@ watch(
 const voiceInput = useComposerVoiceInput({
   insertTranscript: insertVoiceTranscriptIntoInput,
 })
+// Quick dictation: one-tap browser speech recognition that types straight
+// into the input box (user reviews/sends manually). Distinct from the
+// full VoiceDialogueControls flow — this is keyboard-replacement, not
+// a conversation. iOS Safari PWA exposes webkitSpeechRecognition.
+const dictation = useBrowserSpeechRecognition({
+  messages: {
+    unsupported: t('chat.voiceInput.browserSpeechUnsupported'),
+    failed: t('chat.voiceInput.browserSpeechFailed'),
+    failedWithReason: (reason: string) => t('chat.voiceInput.browserSpeechFailedWithReason', { error: reason }),
+  },
+})
+const dictationActive = computed(() => dictation.status.value === 'listening')
+let dictationBaseLength = 0
+function dictationText(): string {
+  return normalizeComposerVoiceTranscript([
+    dictation.transcript.value,
+    dictation.partialTranscript.value,
+  ].filter(Boolean).join(' '))
+}
+watch(() => dictationText(), (text) => {
+  if (!dictationActive.value) return
+  inputText.value = inputText.value.slice(0, dictationBaseLength) + text
+})
+async function toggleDictation() {
+  if (dictationActive.value) {
+    const finalText = await dictation.stop()
+    const suffix = normalizeComposerVoiceTranscript(finalText || dictationText())
+    inputText.value = inputText.value.slice(0, dictationBaseLength) + suffix
+    return
+  }
+  dictationBaseLength = inputText.value.length
+  try {
+    await dictation.start({ language: navigator.language || 'zh-CN', continuous: true })
+  } catch {
+    /* unsupported / denied — surfaced via dictation.error */
+  }
+}
 
 const CODING_AGENT_SLASH_COMMANDS = ['context', 'compact', 'usage', 'status']
 
@@ -1383,6 +1421,25 @@ function openAttachmentPreview(attachment: Attachment) {
 
         </div>
         <div class="input-actions">
+          <NTooltip trigger="hover" placement="top">
+            <template #trigger>
+              <button
+                class="dictation-button"
+                :class="{ active: dictationActive }"
+                type="button"
+                :aria-label="t('chat.voiceInput.startCapture')"
+                :title="t('chat.voiceInput.startCapture')"
+                @click="toggleDictation"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+                  <path d="M12 18v4" />
+                </svg>
+              </button>
+            </template>
+            {{ t('chat.voiceInput.startCapture') }}
+          </NTooltip>
           <VoiceDialogueControls
             :status="voiceInput.dialogue.status.value"
             :transcript="voiceInput.transcript.value"
@@ -2299,6 +2356,35 @@ function openAttachmentPreview(attachment: Attachment) {
     color: $text-primary;
     background: rgba(var(--text-primary-rgb), 0.08);
   }
+}
+
+.dictation-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+}
+
+.dictation-button:hover {
+  opacity: 1;
+}
+
+.dictation-button.active {
+  opacity: 1;
+  color: #ef4444;
+  animation: dictation-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes dictation-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
 }
 
 .input-actions {
