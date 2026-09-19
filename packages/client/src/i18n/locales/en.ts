@@ -599,8 +599,21 @@ export default {
     title: 'Device connections',
     tabs: {
       app: 'App',
+      cron: 'Scheduled Jobs',
       mcu: 'Little Box',
       devices: 'Devices',
+    },
+    cron: {
+      title: 'Scheduled Jobs (cron)',
+      refresh: 'Refresh',
+      hint: 'Read-only view of hermes cron jobs. Enable/disable via the hermes CLI.',
+      empty: 'No cron jobs found.',
+      disabled: 'disabled',
+      next: 'Next:',
+      last: 'Last run:',
+      skill: 'Skill:',
+      noOutputs: 'No run outputs.',
+      moreOutputs: '…and {n} older runs',
     },
     app: {
       subtitle: 'Connect the App to your devices',

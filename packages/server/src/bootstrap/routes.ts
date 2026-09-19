@@ -28,6 +28,7 @@ import { mcuDeviceRoutes } from '../modules/studio/routes/mcu-devices'
 
 import { sessionRoutes } from '../modules/studio/routes/sessions'
 import { projectRoutes } from '../modules/studio/routes/projects'
+import { cronRoutes } from '../modules/studio/routes/cron'
 import { profileRoutes } from '../modules/hermes/routes/profiles'
 import { skillRoutes } from '../modules/hermes/routes/skills'
 import { skillBundleRoutes } from '../modules/hermes/routes/skill-bundles'
@@ -111,6 +112,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(socialMessageRoutes.routes())
   app.use(sessionRoutes.routes())
   app.use(projectRoutes.routes())
+  app.use(cronRoutes.routes())
   app.use(profileRoutes.routes())
   app.use(ekkoMemoryRoutes.routes())
   app.use(ekkoSkillRoutes.routes())

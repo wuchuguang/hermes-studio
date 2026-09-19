@@ -599,8 +599,21 @@ export default {
     title: '裝置互聯',
     tabs: {
       app: 'App',
+      cron: '定時任務',
       mcu: '小方盒',
       devices: '裝置',
+    },
+    cron: {
+      title: '定時任務 (cron)',
+      refresh: '重新整理',
+      hint: '唯讀展示 hermes cron 任務；啟停請在 hermes CLI 操作。',
+      empty: '沒有 cron 任務。',
+      disabled: '已停用',
+      next: '下次:',
+      last: '上次:',
+      skill: '技能:',
+      noOutputs: '沒有執行產物。',
+      moreOutputs: '…還有 {n} 次更早的執行',
     },
     app: {
       subtitle: '讓 App 連接你的裝置',
