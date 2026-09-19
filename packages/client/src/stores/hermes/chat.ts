@@ -476,6 +476,8 @@ export interface Session {
   inputTokens?: number
   outputTokens?: number
   contextTokens?: number
+  /** Server-estimated USD cost for the whole session (state.db). */
+  estimatedCostUsd?: number
   endedAt?: number | null
   parentSessionId?: string | null
   forkPointMessageId?: string | null
