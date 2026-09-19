@@ -35,6 +35,7 @@ sessionRoutes.post('/api/studio/sessions/:id/workspace-file/rename', ctrl.rename
 sessionRoutes.post('/api/studio/sessions/:id/workspace-file/copy', ctrl.copyWorkspaceFile)
 sessionRoutes.get('/api/studio/sessions/:id', ctrl.get)
 sessionRoutes.get('/api/studio/sessions/:id/export', ctrl.exportSession)
+sessionRoutes.post('/api/studio/sessions/:id/save-obsidian', ctrl.saveSessionToObsidian)
 sessionRoutes.get('/api/studio/sessions/:id/usage', ctrl.usageSingle)
 sessionRoutes.delete('/api/studio/sessions/:id', ctrl.remove)
 sessionRoutes.post('/api/studio/sessions/batch-delete', ctrl.batchRemove)

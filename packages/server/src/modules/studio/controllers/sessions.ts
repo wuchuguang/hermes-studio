@@ -2106,6 +2106,48 @@ export async function exportSession(ctx: any) {
   }
 }
 
+/**
+ * Save a session into the user's Obsidian vault as markdown.
+ * Category routing: stocks/finance titles -> 行业研究/, else 认知武器库/.
+ * Filename: YYYY-MM-DD-<safe title>-<id8>.md (user's naming convention).
+ * Vault root is fixed to the user's real vault; env override supported.
+ */
+export async function saveSessionToObsidian(ctx: any) {
+  const session = localGetSessionDetail(ctx.params.id)
+  if (!session) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, session)) return
+  try {
+    const { writeFile, mkdir } = await import('fs/promises')
+    const { join } = await import('path')
+    const vault = process.env.HERMES_OBSIDIAN_VAULT?.trim()
+      || join(process.env.HOME || '/Users/wu1115', 'Documents', 'bdpan', 'obsidian')
+    const title = session.title || 'session'
+    const lower = title.toLowerCase()
+    const financeWords = ['股票', '股', 'a股', '美股', '港股', 'etf', '基金', '行业', '龙头', 'cpo', '财报', '市值', '个股', '板块', ' invest', 'stock']
+    const isFinance = financeWords.some((w) => lower.includes(w))
+    const subdir = isFinance ? '行业研究' : '认知武器库'
+    const dir = join(vault, subdir)
+    await mkdir(dir, { recursive: true })
+    const date = new Date()
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    const safeTitle = title.replace(/[/\\:*?"<>|]/g, '_').trim().slice(0, 60) || 'session'
+    const filename = `${y}-${m}-${d}-${safeTitle}-${ctx.params.id.slice(0, 8)}.md`
+    const body = serializeAsText(session.title, (session as any).messages || [])
+    const header = `# ${title}\n\n> 会话ID: ${session.id} · 导出于 ${y}-${m}-${d} · 模型: ${session.model || 'n/a'}\n\n`
+    await writeFile(join(dir, filename), header + body, 'utf8')
+    ctx.body = { ok: true, path: join(subdir, filename) }
+  } catch (err: any) {
+    ctx.status = 500
+    ctx.body = { error: err?.message || 'save failed' }
+  }
+}
+
 async function compressSession(session: any) {
   const profile = session.profile || getActiveProfileName()
   const upstream = ''

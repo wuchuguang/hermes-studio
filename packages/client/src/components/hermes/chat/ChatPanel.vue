@@ -5,6 +5,7 @@ import {
   createSessionCategory,
   deleteSessionCategory,
   exportSession,
+  saveSessionToObsidian,
   fetchSessionCategories,
   fetchStudioProjects,
   renameSession,
@@ -1910,6 +1911,7 @@ const contextMenuOptions = computed(() => buildSessionContextMenuOptions({
     export: t("chat.export"),
     exportFull: t("chat.exportFull"),
     exportCompressed: t("chat.exportCompressed"),
+    saveObsidian: t("chat.saveObsidian"),
     open: t(desktopChatWindowAvailable
       ? "chat.openSessionInNewWindow"
       : "chat.openSessionInNewTab"),
@@ -2016,6 +2018,17 @@ async function handleContextMenuSelect(key: string) {
     } catch {
       loadingMsg?.destroy();
       message.error(t("chat.exportFailed"));
+    }
+  } else if (key === "save-obsidian") {
+    try {
+      const res = await saveSessionToObsidian(contextSessionId.value);
+      if (res?.ok) {
+        message.success(`${t("chat.obsidianSaved")}${res.path}`);
+      } else {
+        message.error(t("chat.obsidianSaveFailed"));
+      }
+    } catch {
+      message.error(t("chat.obsidianSaveFailed"));
     }
   } else if (key === "workspace") {
     const session = chatStore.sessions.find(

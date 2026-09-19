@@ -10,6 +10,7 @@ export type SessionMenuIconName =
   | 'model'
   | 'category'
   | 'export'
+  | 'save'
   | 'open-new'
   | 'link'
   | 'copy'
@@ -37,6 +38,7 @@ interface SessionContextMenuLabels {
   export: string
   exportFull: string
   exportCompressed: string
+  saveObsidian: string
   open: string
   copyLink: string
   copyId: string
@@ -109,6 +111,12 @@ function iconChildren(name: SessionMenuIconName): VNodeChild[] {
       return [
         h('rect', { x: 9, y: 9, width: 12, height: 12, rx: 2 }),
         h('path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' }),
+      ]
+    case 'save':
+      // book/vault icon
+      return [
+        h('path', { d: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20' }),
+        h('path', { d: 'M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' }),
       ]
   }
 }
@@ -200,6 +208,7 @@ export function buildSessionContextMenuOptions({
       },
     ],
   }))
+  options.push(actionOption(labels.saveObsidian, 'save-obsidian', 'save'))
   options.push(actionOption(labels.open, 'open-link', 'open-new'))
   options.push(actionOption(labels.copyLink, 'copy-link', 'link'))
   options.push(actionOption(labels.copyId, 'copy-id', 'copy'))

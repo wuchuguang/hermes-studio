@@ -669,6 +669,13 @@ export async function exportSession(id: string, mode: 'full' | 'compressed' = 'f
   URL.revokeObjectURL(a.href)
 }
 
+export async function saveSessionToObsidian(id: string): Promise<{ ok: boolean; path: string }> {
+  return request<{ ok: boolean; path: string }>(
+    `/api/studio/sessions/${encodeURIComponent(id)}/save-obsidian`,
+    { method: 'POST' },
+  )
+}
+
 export interface UsageStatsResponse {
   total_input_tokens: number
   total_output_tokens: number
