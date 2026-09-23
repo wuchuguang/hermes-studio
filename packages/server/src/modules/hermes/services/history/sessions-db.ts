@@ -1,6 +1,6 @@
 import { getActiveProfileDir, getHermesBaseDir } from '../profiles/profile'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readdirSync } from 'fs'
 import type { LocalUsageStats } from '../../../studio/contracts/runs/usage'
 import type { ExternalSkillUsageEvent } from '../../../studio/contracts/skills'
 
@@ -103,6 +103,61 @@ function sessionDbPathForProfile(profile?: string): string {
   if (!name) return sessionDbPath()
   if (name === 'default') return join(getHermesBaseDir(), 'state.db')
   return join(getHermesBaseDir(), 'profiles', name, 'state.db')
+}
+
+/**
+ * All profile state.db files that exist on disk: the base dir plus every
+ * profiles/<name>/state.db. Desktop Bot Mode (2026-09) gives each bot its own
+ * profile db, so an un-profiled query must span all of them — otherwise studio
+ * only sees whichever profile `active_profile` happens to name.
+ * Sorted for stable cache keys; deduped (base dir == default profile dir).
+ */
+function allSessionDbPaths(): string[] {
+  const base = getHermesBaseDir()
+  const paths = new Set<string>([join(base, 'state.db')])
+  const profilesDir = join(base, 'profiles')
+  try {
+    for (const entry of readdirSync(profilesDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const dbPath = join(profilesDir, entry.name, 'state.db')
+      if (existsSync(dbPath)) paths.add(dbPath)
+    }
+  } catch {}
+  return [...paths].sort()
+}
+
+/**
+ * Merged session index across every profile db (root + profiles/*). Rows from
+ * all dbs are folded into one id-keyed index so chain traversal (compression
+ * continuations) keeps working — session ids are globally unique because they
+ * embed a timestamp, and a chain never spans two dbs.
+ */
+function loadAllSessionsAcrossProfiles(): SessionIndex {
+  const cacheKey = `all:${allSessionDbPaths().join('|')}`
+  const now = Date.now()
+  const hit = sessionIndexCache.get(cacheKey)
+  if (hit && now - hit.at < SESSION_INDEX_CACHE_TTL_MS) return hit.idx
+
+  const byId = new Map<string, HermesSessionInternalRow>()
+  const childrenByParent = new Map<string, string[]>()
+  const { DatabaseSync } = require('node:sqlite')
+  for (const dbPath of allSessionDbPaths()) {
+    let db: any = null
+    try {
+      db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+      const one = loadAllSessions(db)
+      for (const [id, row] of one.byId) byId.set(id, row)
+      for (const [parent, ids] of one.childrenByParent) {
+        const list = childrenByParent.get(parent) || []
+        list.push(...ids)
+        childrenByParent.set(parent, list)
+      }
+    } catch { /* a missing/corrupt profile db must not break the listing */ }
+    finally { try { db?.close() } catch {} }
+  }
+  const idx: SessionIndex = { byId, childrenByParent }
+  sessionIndexCache.set(cacheKey, { at: now, idx })
+  return idx
 }
 
 function normalizeNumber(value: unknown, fallback = 0): number {
@@ -739,11 +794,33 @@ async function openSessionDb(profile?: string) {
  * Lightweight alternative: get messages + session row for a single session ID
  * without chain traversal. Used by syncFromHermes for ephemeral sessions.
  */
+/**
+ * Open whichever profile db holds sessionId — detail rows carry no profile
+ * marker, and after desktop Bot Mode the session may live in any profile db.
+ * Tries the active profile first (usual case), then every other db.
+ */
+async function openSessionDbForSession(sessionId: string) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const tried: string[] = []
+  for (const dbPath of [sessionDbPath(), ...allSessionDbPaths()]) {
+    if (tried.includes(dbPath)) continue
+    tried.push(dbPath)
+    try {
+      const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+      const row = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)
+      if (row) return db
+      db.close()
+    } catch { /* skip unreadable db */ }
+  }
+  return null
+}
+
 export async function getSessionMessagesFromDb(sessionId: string): Promise<{
   messages: HermesMessageRow[]
   session: HermesSessionRow | null
 } | null> {
-  const db = await openSessionDb()
+  const db = await openSessionDbForSession(sessionId)
+  if (!db) return null
   try {
     const sessionRow = db.prepare(`
       SELECT ${SESSION_SELECT}
@@ -767,7 +844,8 @@ export async function getSessionMessagesFromDb(sessionId: string): Promise<{
 }
 
 export async function getSessionDetailFromDb(sessionId: string): Promise<HermesSessionDetailRow | null> {
-  const db = await openSessionDb()
+  const db = await openSessionDbForSession(sessionId)
+  if (!db) return null
   try {
     const chain = loadSessionChain(db, sessionId)
     if (!chain.length) return null
@@ -800,13 +878,18 @@ export async function getCompressionContinuationFromDb(
 ): Promise<{ sessionId: string; title: string | null } | null> {
   if (!SQLITE_AVAILABLE) return null
   const { DatabaseSync } = await import('node:sqlite')
-  const dbPath = profile ? sessionDbPathForProfile(profile) : sessionDbPath()
-  let db: any
-  try {
-    db = new DatabaseSync(dbPath, { open: true, readOnly: true })
-  } catch {
-    return null
+  // No profile → probe every db for the session (desktop Bot Mode split dbs).
+  const dbPaths = profile ? [sessionDbPathForProfile(profile)] : [sessionDbPath(), ...allSessionDbPaths()]
+  let db: any = null
+  for (const dbPath of [...new Set(dbPaths)]) {
+    try {
+      const candidate = new DatabaseSync(dbPath, { open: true, readOnly: true })
+      const exists = candidate.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)
+      if (exists) { db = candidate; break }
+      candidate.close()
+    } catch { /* try next db */ }
   }
+  if (!db) return null
   try {
     const chain = loadSessionChain(db, sessionId)
     if (chain.length < 2) return null
@@ -1651,8 +1734,20 @@ export async function getUsageStatsFromDb(
  */
 export async function listCompressionChainSessionIds(profile?: string): Promise<Set<string>> {
   if (!SQLITE_AVAILABLE) return new Set()
+  // No profile → merged index across all profile dbs (see listSessionSummaries).
+  if (!profile) {
+    const idx = loadAllSessionsAcrossProfiles()
+    const chainIds = new Set<string>()
+    for (const root of idx.byId.values()) {
+      const chain = collectSessionChain(root, idx)
+      if (chain.length > 1) {
+        for (const s of chain) chainIds.add(s.id)
+      }
+    }
+    return chainIds
+  }
   const { DatabaseSync } = await import('node:sqlite')
-  const dbPath = profile ? sessionDbPathForProfile(profile) : sessionDbPath()
+  const dbPath = sessionDbPathForProfile(profile)
   let db: any
   try {
     db = new DatabaseSync(dbPath, { open: true, readOnly: true })
@@ -1679,8 +1774,20 @@ export async function listSessionSummaries(source?: string, limit = 2000, profil
     throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
   }
 
+  // No profile → span every profile db so desktop Bot Mode sessions (one db
+  // per bot profile) are all visible; explicit profile stays single-db.
+  if (!profile) {
+    const idx = loadAllSessionsAcrossProfiles()
+    return [...idx.byId.values()]
+      .filter(session => !source || session.source === source)
+      .filter(session => !isCompressionContinuationChild(session, idx))
+      .map(session => projectSessionSummary(session, collectSessionChain(session, idx)))
+      .sort(compareSessionSummariesNewestFirst)
+      .slice(0, limit)
+  }
+
   const { DatabaseSync } = await import('node:sqlite')
-  const dbPath = profile ? sessionDbPathForProfile(profile) : sessionDbPath()
+  const dbPath = sessionDbPathForProfile(profile)
   const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
 
   try {
@@ -1705,9 +1812,39 @@ export async function listSessionSummaryGroups(
     throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
   }
 
+  // No profile → merged index across all profile dbs (see listSessionSummaries).
+  if (!profile) {
+    const idx = loadAllSessionsAcrossProfiles()
+    const grouped = new Map<string, HermesSessionRow[]>()
+    const includedIds = new Set(includedSessionIds)
+    const included = new Map<string, HermesSessionRow>()
+
+    for (const root of idx.byId.values()) {
+      if (isCompressionContinuationChild(root, idx)) continue
+      const summary = projectSessionSummary(root, collectSessionChain(root, idx))
+      const sessions = grouped.get(summary.source) || []
+      sessions.push(summary)
+      grouped.set(summary.source, sessions)
+      if (includedIds.has(summary.id)) included.set(summary.id, summary)
+    }
+
+    const normalizedLimit = Math.max(1, limitPerSource)
+    const groups = [...grouped.entries()].map(([source, sessions]) => {
+      sessions.sort(compareSessionSummariesNewestFirst)
+      return {
+        source,
+        sessions: sessions.slice(0, normalizedLimit),
+        total: sessions.length,
+        hasMore: sessions.length > normalizedLimit,
+      }
+    })
+
+    return { groups, included: [...included.values()] }
+  }
+
   const db = await openSessionDb(profile)
   try {
-    const idx = loadAllSessionsCached(db, profile ? sessionDbPathForProfile(profile) : sessionDbPath())
+    const idx = loadAllSessionsCached(db, sessionDbPathForProfile(profile))
     const grouped = new Map<string, HermesSessionRow[]>()
     const includedIds = new Set(includedSessionIds)
     const included = new Map<string, HermesSessionRow>()
