@@ -3,7 +3,6 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { searchWorkspaceDirs } from '@/api/studio/sessions'
 import { useDefaultWorkspace } from '@/composables/useDefaultWorkspace'
-import { copyToClipboard } from '@/utils/clipboard'
 
 /**
  * Primary-directory picker: search by name, inline results, selected-path
