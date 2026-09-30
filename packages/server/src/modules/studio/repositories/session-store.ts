@@ -7,6 +7,8 @@ import { TASK_PLANS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
+import { getRecordedSessionTokensBatch } from './usage-store'
+import { agentFamilyForRuntime, isAgentRuntime } from '../contracts/agents/runtime'
 
 // Re-export types for compatibility with sessions-db.ts consumers
 export interface HermesSessionRow {
@@ -43,6 +45,7 @@ export interface HermesSessionRow {
   preview: string
   last_active: number
   is_archived: number
+  is_pinned: number
   push_enabled: number
   workspace: string | null
   workspace_extra_dirs: string[]
@@ -81,6 +84,7 @@ export interface HermesSessionSearchRow extends HermesSessionRow {
 export interface SessionListOptions {
   offset?: number
   categoryId?: number | null
+  pinned?: boolean
   includeSessionIds?: string[]
   sources?: string[]
   profiles?: string[]
@@ -138,6 +142,20 @@ export function serializeWorkspaceExtraDirs(value: unknown): string {
 }
 
 function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
+  return mapSessionRows([row])[0]
+}
+
+function mapSessionRows(rows: Record<string, unknown>[]): HermesSessionRow[] {
+  // Native Coding Agents' ledger owns token accounting. Stored counters can remain
+  // zero; using them would erase live usage on the next session-list poll.
+  const nativeIds = rows.filter(row => row.source === 'coding_agent'
+    || (isAgentRuntime(row.agent) && agentFamilyForRuntime(row.agent) === 'coding')
+    || row.agent === 'claude' || row.agent === 'claude_code').map(row => String(row.id))
+  const usage = nativeIds.length ? getRecordedSessionTokensBatch(nativeIds, 'coding_agent') : {}
+  return rows.map(row => mapStoredSessionRow({ ...row, ...usage[String(row.id)] }))
+}
+
+function mapStoredSessionRow(row: Record<string, unknown>): HermesSessionRow {
   const rawTitle = row.title != null ? String(row.title) : null
   const preview = String(row.preview || '')
   const title = rawTitle || (preview ? (preview.length > 40 ? preview.slice(0, 40) + '...' : preview) : null)
@@ -175,6 +193,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     preview: String(row.preview || ''),
     last_active: Number(row.last_active || 0),
     is_archived: Number(row.is_archived || 0),
+    is_pinned: Number(row.is_pinned || 0),
     push_enabled: Number(row.push_enabled || 0) !== 0 ? 1 : 0,
     workspace: row.workspace != null ? String(row.workspace) : null,
     workspace_extra_dirs: parseWorkspaceExtraDirs(row.workspace_extra_dirs),
@@ -247,7 +266,7 @@ export function createSession(data: {
       message_count: 0, tool_call_count: 0,
       input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
       billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null,
-      cost_status: '', preview: '', last_active: now, is_archived: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
+      cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled === false || data.push_enabled === 0 ? 0 : 1, workspace: data.workspace || null,
       workspace_extra_dirs: parseWorkspaceExtraDirs(data.workspace_extra_dirs),
       category_id: data.category_id ?? null,
       history_revision: 0,
@@ -278,7 +297,7 @@ export function createSession(data: {
     data.workspace || null,
     serializeWorkspaceExtraDirs(data.workspace_extra_dirs),
     data.category_id ?? null,
-    data.push_enabled ? 1 : 0,
+    data.push_enabled === false || data.push_enabled === 0 ? 0 : 1,
   )
   return getSession(data.id)!
 }
@@ -547,6 +566,13 @@ export function setSessionArchived(id: string, archived: boolean): boolean {
   return result.changes > 0
 }
 
+export function setSessionPinned(id: string, pinned: boolean): boolean {
+  if (!isSqliteAvailable()) return false
+  const result = getDb()!.prepare(`UPDATE ${SESSIONS_TABLE} SET is_pinned = ? WHERE id = ?`)
+    .run(pinned ? 1 : 0, id)
+  return result.changes > 0
+}
+
 export function setSessionPushEnabled(id: string, enabled: boolean): boolean {
   if (!isSqliteAvailable()) return false
   const db = getDb()!
@@ -604,13 +630,13 @@ export function listSessions(
     FROM ${SESSIONS_TABLE} s
     LEFT JOIN ${SESSIONS_TABLE} p ON p.id = s.parent_session_id
     WHERE ${filters.sql}
-    ORDER BY s.last_active DESC, s.id DESC
+    ORDER BY s.is_pinned DESC, s.last_active DESC, s.id DESC
     LIMIT ? OFFSET ?
   `
 
   const offset = Number.isSafeInteger(options.offset) && options.offset! > 0 ? options.offset! : 0
   const rows = db.prepare(sql).all(...filters.params, limit, offset) as Record<string, unknown>[]
-  return rows.map(mapSessionRow)
+  return mapSessionRows(rows)
 }
 
 export function countSessions(
@@ -680,6 +706,7 @@ function sessionFilterSql(
   if (options.includeArchived === false) {
     clauses.push('COALESCE(s.is_archived, 0) = 0')
   }
+  if (options.pinned !== undefined) clauses.push(options.pinned ? 's.is_pinned = 1' : 's.is_pinned = 0')
   if (options.categoryId === null) {
     clauses.push(`(s.category_id IS NULL OR NOT EXISTS (SELECT 1 FROM ${SESSION_CATEGORIES_TABLE} c WHERE c.id = s.category_id))`)
   } else if (options.categoryId !== undefined) {
@@ -738,8 +765,7 @@ export function searchSessions(
        ORDER BY s.last_active DESC
        LIMIT ?`,
     ).all(...filters.params, limit) as Record<string, unknown>[]
-    return rows.map(row => {
-      const session = mapSessionRow(row)
+    return mapSessionRows(rows).map(session => {
       return { ...session, snippet: session.preview || '', matched_message_id: null, rank: 0 }
     })
   }
@@ -801,8 +827,9 @@ export function searchSessions(
      LIMIT 1`,
   )
 
-  return sessionRows.map(row => {
-    const session = mapSessionRow(row)
+  const sessions = mapSessionRows(sessionRows)
+  return sessionRows.map((row, index) => {
+    const session = sessions[index]
     let snippet = ''
     let matched_message_id: number | null = null
     const title = row.title != null ? String(row.title) : ''

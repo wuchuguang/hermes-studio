@@ -50,6 +50,48 @@ export const TASK_PLANS_SCHEMA: Record<string, string> = {
 
 export const SESSIONS_TABLE = 'sessions'
 
+export const SESSION_SHARES_TABLE = 'session_shares'
+export const SESSION_SHARES_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  session_id: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  created_by_user_id: 'INTEGER NOT NULL',
+  sharer_app_user_id: 'INTEGER NOT NULL',
+  sharer_name_snapshot: 'TEXT NOT NULL',
+  recipient_app_user_id: 'INTEGER',
+  recipient_name_snapshot: 'TEXT',
+  token_hash: 'TEXT NOT NULL',
+  permissions: 'TEXT NOT NULL',
+  workspace_root: 'TEXT NOT NULL',
+  // Allow existing tables to migrate. Legacy grants without a pinned real path
+  // remain unable to access workspace files until a new share is created.
+  workspace_real_root: "TEXT NOT NULL DEFAULT ''",
+  extra_paths: "TEXT NOT NULL DEFAULT '[]'",
+  policy_version: 'INTEGER NOT NULL DEFAULT 1',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+  expires_at: 'INTEGER NOT NULL',
+  claimed_at: 'INTEGER',
+  revoked_at: 'INTEGER',
+}
+export const SESSION_SHARES_INDEXES = {
+  uniq_session_shares_token: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_shares_token ON session_shares(token_hash)',
+  idx_session_shares_sender: 'CREATE INDEX IF NOT EXISTS idx_session_shares_sender ON session_shares(session_id, sharer_app_user_id, created_at)',
+  idx_session_shares_recipient: 'CREATE INDEX IF NOT EXISTS idx_session_shares_recipient ON session_shares(recipient_app_user_id)',
+}
+
+export const SESSION_UPLOADS_TABLE = 'session_uploads'
+export const SESSION_UPLOADS_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  session_id: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  path: 'TEXT NOT NULL',
+  real_path: 'TEXT NOT NULL',
+}
+export const SESSION_UPLOADS_INDEXES = {
+  uniq_session_uploads_path: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_uploads_path ON session_uploads(session_id, profile, path)',
+}
+
 export const SESSION_CATEGORIES_TABLE = 'session_categories'
 
 export const SESSION_CATEGORIES_SCHEMA: Record<string, string> = {
@@ -97,7 +139,8 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   preview: 'TEXT NOT NULL DEFAULT \'\'',
   last_active: 'INTEGER NOT NULL',
   is_archived: 'INTEGER NOT NULL DEFAULT 0',
-  push_enabled: 'INTEGER NOT NULL DEFAULT 0',
+  is_pinned: 'INTEGER NOT NULL DEFAULT 0',
+  push_enabled: 'INTEGER NOT NULL DEFAULT 1',
   workspace: 'TEXT',
   workspace_extra_dirs: "TEXT NOT NULL DEFAULT '[]'",
   category_id: 'INTEGER',
@@ -285,6 +328,7 @@ export const WORKFLOW_RUNS_TABLE = 'workflow_runs'
 export const WORKFLOW_RUNS_SCHEMA: Record<string, string> = {
   id: 'TEXT PRIMARY KEY',
   workflow_id: 'TEXT NOT NULL',
+  user_id: 'INTEGER',
   profile: "TEXT NOT NULL DEFAULT 'default'",
   workspace: 'TEXT',
   start_node_ids_json: "TEXT NOT NULL DEFAULT '[]'",
@@ -330,6 +374,19 @@ export const WORKFLOW_RUN_NODE_SESSIONS_SCHEMA: Record<string, string> = {
   created_at: 'INTEGER NOT NULL',
   updated_at: 'INTEGER NOT NULL',
   error: 'TEXT',
+}
+
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE = 'workflow_run_quality_evaluations'
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY', run_id: 'TEXT NOT NULL', workflow_id: 'TEXT NOT NULL', node_session_id: 'TEXT NOT NULL',
+  node_id: 'TEXT NOT NULL', execution_id: 'TEXT NOT NULL', iteration_path_json: "TEXT NOT NULL DEFAULT '[]'",
+  input_hash: 'TEXT NOT NULL', config_hash: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'", criteria_json: "TEXT NOT NULL DEFAULT '[]'", reason_code: "TEXT NOT NULL DEFAULT ''",
+  duration_ms: 'INTEGER NOT NULL DEFAULT 0', created_at: 'INTEGER NOT NULL',
+}
+export const WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES = {
+  idx_workflow_quality_run: 'CREATE INDEX IF NOT EXISTS idx_workflow_quality_run ON workflow_run_quality_evaluations(run_id, created_at)',
+  uniq_workflow_quality_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_workflow_quality_attempt ON workflow_run_quality_evaluations(node_session_id, input_hash, config_hash)',
 }
 
 export const WORKFLOW_RUN_NODE_SESSIONS_INDEXES = {
@@ -583,6 +640,7 @@ export const APP_CONNECTIONS_SCHEMA: Record<string, string> = {
   device_model: "TEXT NOT NULL DEFAULT ''",
   connection_type: "TEXT NOT NULL DEFAULT 'lan'",
   user_id: 'INTEGER NOT NULL',
+  push_enabled: 'INTEGER NOT NULL DEFAULT 1',
   cloud_user_id: 'INTEGER NOT NULL DEFAULT 0',
   token_hash: "TEXT NOT NULL DEFAULT ''",
   token_expires_at: 'INTEGER NOT NULL DEFAULT 0',
@@ -878,6 +936,13 @@ export const GC_MESSAGES_SCHEMA: Record<string, string> = {
   reasoning_content: 'TEXT',
 }
 
+export const GC_MESSAGE_ROUTING_CONTEXTS_TABLE = 'gc_message_routing_contexts'
+export const GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', requesterMemberId: 'TEXT NOT NULL', requesterAuthUserId: 'INTEGER', createdAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_DECISIONS_TABLE = 'gc_message_routing_decisions'
+export const GC_MESSAGE_ROUTING_DECISIONS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', messageHash: 'TEXT NOT NULL', candidateHash: 'TEXT NOT NULL', configHash: 'TEXT NOT NULL', targetAgentId: 'TEXT', targetAgentName: 'TEXT', mode: "TEXT NOT NULL DEFAULT 'suggest'", status: "TEXT NOT NULL DEFAULT 'suggested'", queueId: 'TEXT', confidence: 'REAL', handoffComplete: 'INTEGER', loopDetected: 'INTEGER', createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+export const GC_MESSAGE_ROUTING_CLAIMS_TABLE = 'gc_message_routing_claims'
+export const GC_MESSAGE_ROUTING_CLAIMS_SCHEMA: Record<string, string> = { messageId: 'TEXT PRIMARY KEY', roomId: 'TEXT NOT NULL', targetAgentId: 'TEXT NOT NULL', queueId: 'TEXT NOT NULL', status: "TEXT NOT NULL DEFAULT 'queued'", createdAt: 'INTEGER NOT NULL', updatedAt: 'INTEGER NOT NULL' }
+
 export const GC_EXECUTION_QUEUE_TABLE = 'gc_execution_queue'
 
 export const GC_EXECUTION_QUEUE_SCHEMA: Record<string, string> = {
@@ -919,6 +984,7 @@ export const GC_ROOM_AGENTS_SCHEMA: Record<string, string> = {
   agentId: 'TEXT NOT NULL',
   agent: "TEXT NOT NULL DEFAULT 'hermes'",
   agentMode: "TEXT NOT NULL DEFAULT 'scoped'",
+  priorAgentMode: "TEXT NOT NULL DEFAULT ''",
   profile: 'TEXT NOT NULL',
   provider: "TEXT NOT NULL DEFAULT ''",
   model: "TEXT NOT NULL DEFAULT ''",
@@ -943,6 +1009,7 @@ export const GC_AGENT_PRESETS_SCHEMA: Record<string, string> = {
   ownerUserId: 'INTEGER NOT NULL',
   agent: "TEXT NOT NULL DEFAULT 'hermes'",
   agentMode: "TEXT NOT NULL DEFAULT 'scoped'",
+  priorAgentMode: "TEXT NOT NULL DEFAULT ''",
   profile: 'TEXT NOT NULL',
   provider: 'TEXT NOT NULL',
   model: 'TEXT NOT NULL',
@@ -1019,6 +1086,29 @@ export const GC_ROOM_SUMMARIES_SCHEMA: Record<string, string> = {
   summaryLeaseExpiresAt: 'INTEGER NOT NULL DEFAULT 0',
   summaryRunGeneration: 'INTEGER NOT NULL DEFAULT 0',
   summaryDrainThroughMessageId: "TEXT NOT NULL DEFAULT ''",
+}
+
+export const GC_SUMMARY_REVIEWS_TABLE = 'gc_summary_reviews'
+export const GC_SUMMARY_REVIEWS_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  roomId: 'TEXT NOT NULL',
+  sourceVersion: 'INTEGER NOT NULL',
+  sourceSummaryHash: 'TEXT NOT NULL',
+  sourceAnchor: "TEXT NOT NULL DEFAULT ''",
+  sourceTurnCount: 'INTEGER NOT NULL DEFAULT 0',
+  inputHash: 'TEXT NOT NULL',
+  configHash: 'TEXT NOT NULL',
+  status: "TEXT NOT NULL DEFAULT 'completed'",
+  decision: "TEXT NOT NULL DEFAULT 'unknown'",
+  ruleResultsJson: "TEXT NOT NULL DEFAULT '[]'",
+  reasonCode: "TEXT NOT NULL DEFAULT ''",
+  durationMs: 'INTEGER NOT NULL DEFAULT 0',
+  createdAt: 'INTEGER NOT NULL',
+  appliedRevisionVersion: 'INTEGER',
+}
+export const GC_SUMMARY_REVIEWS_INDEXES = {
+  idx_gc_summary_reviews_room_version: 'CREATE INDEX IF NOT EXISTS idx_gc_summary_reviews_room_version ON gc_summary_reviews(roomId, sourceVersion, createdAt DESC)',
+  idx_gc_summary_reviews_attempt: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_gc_summary_reviews_attempt ON gc_summary_reviews(roomId, inputHash, configHash)',
 }
 
 export const GC_ROOM_MEMBERS_TABLE = 'gc_room_members'
@@ -1201,6 +1291,7 @@ function syncWorkflowRunNodeSessions(
     syncTable(WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_SCHEMA, {
       indexes: WORKFLOW_RUN_NODE_SESSIONS_INDEXES,
     })
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, { indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES })
     return
   }
 
@@ -1216,6 +1307,9 @@ function syncWorkflowRunNodeSessions(
 
   if (!needsMigration) {
     syncTable(WORKFLOW_RUN_NODE_SESSIONS_TABLE, WORKFLOW_RUN_NODE_SESSIONS_SCHEMA)
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, {
+      indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES,
+    })
     return
   }
 
@@ -1228,6 +1322,9 @@ function syncWorkflowRunNodeSessions(
     ).run()
     db.exec('DROP INDEX IF EXISTS uniq_workflow_run_node_sessions_run_node')
     createIndexes(db, WORKFLOW_RUN_NODE_SESSIONS_INDEXES)
+    syncTable(WORKFLOW_RUN_QUALITY_EVALUATIONS_TABLE, WORKFLOW_RUN_QUALITY_EVALUATIONS_SCHEMA, {
+      indexes: WORKFLOW_RUN_QUALITY_EVALUATIONS_INDEXES,
+    })
     db.exec('COMMIT')
   } catch (error) {
     db.exec('ROLLBACK')
@@ -1609,6 +1706,10 @@ export function initAllHermesTables(): void {
     })
 
     // App authorization codes and connected mobile devices
+    syncTable(SESSION_SHARES_TABLE, SESSION_SHARES_SCHEMA, { indexes: SESSION_SHARES_INDEXES })
+    createIndexes(db, SESSION_SHARES_INDEXES)
+    syncTable(SESSION_UPLOADS_TABLE, SESSION_UPLOADS_SCHEMA, { indexes: SESSION_UPLOADS_INDEXES })
+    createIndexes(db, SESSION_UPLOADS_INDEXES)
     syncTable(APP_CONNECTIONS_TABLE, APP_CONNECTIONS_SCHEMA, {
       indexes: APP_CONNECTIONS_INDEXES,
     })
@@ -1685,6 +1786,9 @@ export function initAllHermesTables(): void {
     // need the context-window index migrated explicitly to avoid scanning and
     // sorting the full message table on every persisted message.
     createIndexes(db, groupChatMessageIndexes)
+    syncTable(GC_MESSAGE_ROUTING_CONTEXTS_TABLE, GC_MESSAGE_ROUTING_CONTEXTS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_DECISIONS_TABLE, GC_MESSAGE_ROUTING_DECISIONS_SCHEMA)
+    syncTable(GC_MESSAGE_ROUTING_CLAIMS_TABLE, GC_MESSAGE_ROUTING_CLAIMS_SCHEMA)
     syncTable(GC_EXECUTION_QUEUE_TABLE, GC_EXECUTION_QUEUE_SCHEMA, {
       indexes: GC_EXECUTION_QUEUE_INDEXES,
     })
@@ -1692,6 +1796,7 @@ export function initAllHermesTables(): void {
     migrateGroupChatActivityTimes(db, Date.now())
     syncTable(GC_CONTEXT_SNAPSHOTS_TABLE, GC_CONTEXT_SNAPSHOTS_SCHEMA)
     syncTable(GC_ROOM_SUMMARIES_TABLE, GC_ROOM_SUMMARIES_SCHEMA)
+    syncTable(GC_SUMMARY_REVIEWS_TABLE, GC_SUMMARY_REVIEWS_SCHEMA, { indexes: GC_SUMMARY_REVIEWS_INDEXES })
     syncTable(GC_PENDING_SESSION_DELETES_TABLE, GC_PENDING_SESSION_DELETES_SCHEMA)
     syncTable(GC_SESSION_PROFILES_TABLE, GC_SESSION_PROFILES_SCHEMA)
 

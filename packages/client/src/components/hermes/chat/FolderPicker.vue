@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { searchWorkspaceDirs } from '@/api/studio/sessions'
 import { useDefaultWorkspace } from '@/composables/useDefaultWorkspace'
+import { copyToClipboard } from '@/utils/clipboard'
 
 /**
  * Primary-directory picker: search by name, inline results, selected-path
@@ -151,15 +152,15 @@ function pickSearchHit(path: string) {
       <button
         v-if="props.showFavorite"
         class="folder-selected-favorite"
+        :class="{ 'is-pinned': props.favorite }"
         type="button"
         :disabled="props.favoriteDisabled"
         :title="props.favoriteTitle"
         :aria-label="props.favoriteTitle"
+        :aria-pressed="Boolean(props.favorite)"
         @click.stop="emit('toggle-favorite')"
       >
-        <span class="folder-selected-star" :class="{ 'is-pinned': props.favorite }">
-          {{ props.favorite ? '★' : '☆' }}
-        </span>
+        <StarIcon :filled="props.favorite" />
       </button>
     </div>
   </div>
@@ -281,20 +282,26 @@ function pickSearchHit(path: string) {
 
 .folder-selected-favorite {
   flex-shrink: 0;
-  border: none;
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: transparent;
   cursor: pointer;
-  padding: 0 3px;
-  color: inherit;
-  opacity: 0.75;
-}
+  transition: background 0.15s, transform 0.15s, color 0.15s;
 
-.folder-selected-favorite:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
+  &:hover:not(:disabled) {
+    color: var(--accent-primary);
+    background: rgba(var(--accent-primary-rgb), 0.08);
+    transform: scale(1.08);
+  }
 
-.folder-selected-star.is-pinned {
-  color: #f5b83d;
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  &.is-pinned {
+    color: var(--accent-primary);
+  }
 }
 </style>

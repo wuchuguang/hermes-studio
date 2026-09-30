@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { isStoredSuperAdmin } from '@/api/client'
 import { useSessionSearch } from '@/composables/useSessionSearch'
+import DesktopUpdateDownloadTab from './DesktopUpdateDownloadTab.vue'
 
 type ActiveSection = 'chat' | 'history' | 'connections' | 'agents' | 'models' | 'group' | 'global' | 'workflow'
 
@@ -58,7 +59,8 @@ function openWorkflow() {
 
 <template>
   <div class="page-sidebar-nav">
-    <div class="page-sidebar-actions">
+    <DesktopUpdateDownloadTab />
+    <div class="page-sidebar-tabs" role="tablist" aria-label="Chat actions">
       <button
         class="page-sidebar-tab"
         type="button"

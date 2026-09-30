@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskPlanCard from '../chat/TaskPlanCard.vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -681,7 +682,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div v-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
+    <div v-if="message.taskPlan" class="group-task-plan-container">
+        <TaskPlanCard class="group-task-plan-card" :plan="message.taskPlan" />
+    </div>
+    <div v-else-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
         <div class="msg-body">
             <div v-if="!embedded" class="msg-header">
                 <GroupAgentMessageAvatar
@@ -894,6 +898,18 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 @use "@/styles/variables" as *;
+
+.group-task-plan-container {
+    display: flow-root;
+    width: 100%;
+    min-width: 0;
+}
+
+.group-task-plan-card {
+    width: calc(100% - 10px);
+    max-width: none;
+    margin: 5px;
+}
 
 .group-message {
     display: flex;
@@ -1122,7 +1138,7 @@ onBeforeUnmount(() => {
 .msg-body {
     display: flex;
     flex-direction: column;
-    min-width: min(260px, 85%);
+    min-width: min(500px, 100%);
     max-width: 85%;
     box-sizing: border-box;
 }
@@ -1269,6 +1285,10 @@ onBeforeUnmount(() => {
             0 0 10px rgba(255, 107, 107, 0.4),
             0 0 20px rgba(255, 107, 107, 0.2);
     }
+}
+
+.group-message:not(.embedded) .msg-content {
+    min-width: min(500px, 100%);
 }
 
 .msg-content {
@@ -1503,7 +1523,13 @@ onBeforeUnmount(() => {
 @media (max-width: $breakpoint-mobile) {
     .group-message .msg-body {
         min-width: 0;
+        width: 100%;
         max-width: 100%;
+    }
+
+    .group-message:not(.embedded) .msg-content {
+        min-width: 0;
+        width: 100%;
     }
 
     .group-message.embedded {

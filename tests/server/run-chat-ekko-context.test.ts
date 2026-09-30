@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { respondToEkkoToolApproval } from '../../packages/server/src/modules/ekko/services/approvals'
 import { respondToEkkoClarification } from '../../packages/server/src/modules/ekko/services/clarifications'
@@ -1469,7 +1470,9 @@ describe('ekko-agent context usage events', () => {
       }),
     ])
     const storedUserMessage = addMessageMock.mock.calls.find(call => call[0]?.role === 'user')?.[0]
-    expect(storedUserMessage?.content).toContain(imagePath)
+    expect(JSON.parse(storedUserMessage?.content)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'image', path: imagePath }),
+    ]))
     expect(storedUserMessage?.content).not.toContain(expectedBase64)
   })
 
@@ -1982,4 +1985,51 @@ describe('ekko-agent context usage events', () => {
     ])
     expect(runInput.messages.some((message: any) => message.content === 'orphan result')).toBe(false)
   })
+
+  it('uses the same resolved MCP snapshot for Ekko tools and guidance on consecutive turns', async () => {
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { nsp, socket, sessionMap } = makeHarness()
+    for (const enabled of [true, false]) {
+      const servers = { 'ekko-studio-api': { command: 'studio', enabled } }
+      await handleEkkoAgentRun(nsp as any, socket as any, {
+        session_id: 'session-1', input: 'Hello', coding_agent_id: 'ekko-agent',
+        instructions: 'Custom instructions', resolved_mcp_servers: servers,
+      }, 'default', sessionMap, vi.fn(() => false))
+      const run = agentRunMock.mock.calls.at(-1)![0]
+      expect(run.toolContext.mcpServers).toBe(servers)
+      const instructions = run.messages.filter((m: any) => m.role === 'system').map((m: any) => m.content).join('\n')
+      expect(instructions).toContain('Custom instructions')
+      expect(instructions.includes('ekko_studio_api_openapi_get')).toBe(enabled)
+      expect(instructions).not.toContain('ekko_studio_update_plan')
+      expect(run.onPlanUpdate).toBeTypeOf('function')
+    }
+  })
+
+  it.each([false, true])('keeps managed credentials until the foreground and its background tasks end: %s', async background => {
+    const { handleEkkoAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-ekko-agent-run')
+    const { runMcpCredentials } = await import('../../packages/server/src/modules/studio/services/auth/run-mcp-credentials')
+    const { nsp, socket, sessionMap } = makeHarness()
+    ;(socket as any).data = { user: { id: 7 } }
+    let file = '', token = '', onEvent: any, scope: AbortSignal
+    agentRunMock.mockImplementationOnce(async (input: any) => {
+      file = input.toolContext.mcpServers['ekko-studio-browser'].env.HERMES_WEB_UI_RUN_TOKEN_FILE
+      token = JSON.parse(await readFile(file, 'utf8')).token
+      scope = input.toolContext.mcpSessionSignal
+      expect(runMcpCredentials.authenticate(token)).toMatchObject({ sessionId: 'session-1', userId: 7 })
+      onEvent = input.onEvent
+      if (background) onEvent({ type: 'subagent.start', runId: 'parent', subagentId: 'background-1', goal: 'Inspect', background: true, startedAt: Date.now() })
+      return { messages: [], output: { content: 'Done' }, apiCalls: 1 }
+    })
+    await handleEkkoAgentRun(nsp as any, socket as any, {
+      session_id: 'session-1', input: 'Hello', coding_agent_id: 'ekko-agent',
+      resolved_mcp_servers: { 'ekko-studio-browser': { command: 'node', env: { HERMES_WEB_UI_MANAGED_MCP: '1' } } },
+    }, 'default', sessionMap, vi.fn(() => false))
+    expect(existsSync(file)).toBe(background)
+    if (background) onEvent({ type: 'subagent.complete', runId: 'parent', subagentId: 'background-1', goal: 'Inspect', background: true,
+      status: 'completed', summary: 'Done', durationMs: 1 })
+    expect(existsSync(file)).toBe(false)
+    expect(scope!.aborted).toBe(true)
+    expect(runMcpCredentials.authenticate(token)).toBeUndefined()
+  })
+
 })

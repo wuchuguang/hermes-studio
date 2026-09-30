@@ -6,7 +6,6 @@ import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
 import { fetchContextLength } from '@/api/studio/sessions'
 import { setModelContext } from '@/api/hermes/model-context'
-import { fetchSocialMessagePlatforms } from '@/api/studio/social-messages'
 import { fetchSkills, type SkillCategory, type SkillInfo } from '@/api/hermes/skills'
 import { deleteSkillBundleApi, fetchSkillBundles, type SkillBundleInfo } from '@/api/hermes/skill-bundles'
 import { NButton, NTooltip, NModal, NInputNumber, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
@@ -282,7 +281,13 @@ const isCodingAgentSession = computed(() => {
     || session.agent === 'pi'
     || session.agent === 'grok'
     || session.agent === 'opencode'
+    || session.agent === 'cursor'
   )
+})
+const isCursorSession = computed(() => chatStore.activeSession?.codingAgentId === 'cursor' || chatStore.activeSession?.agent === 'cursor')
+const showSessionUsage = computed(() => {
+  const session = chatStore.activeSession
+  return isCodingAgentSession.value && session?.codingAgentId !== 'ekko-agent' && session?.agent !== 'ekko-agent'
 })
 const isForkCommandSession = computed(() => !!chatStore.activeSession && chatStore.activeSession.source !== 'coding_agent')
 const skillPickerItems = computed(() => {
@@ -309,7 +314,12 @@ const filteredBridgeCommands = computed(() => {
     ? bridgeCommands.value
     : isCodingAgentSession.value
       ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name)
-        && !(command.name === 'compact' && (chatStore.activeSession?.codingAgentId === 'opencode' || chatStore.activeSession?.agent === 'opencode')))
+        && !(command.name === 'context' && isCursorSession.value)
+        && !(command.name === 'compact' && (
+          chatStore.activeSession?.codingAgentId === 'opencode'
+          || chatStore.activeSession?.agent === 'opencode'
+          || isCursorSession.value
+        )))
       : isForkCommandSession.value
         ? bridgeCommands.value.filter(command => command.name === 'fork')
         : []
@@ -511,15 +521,6 @@ const inputSettingsOptions = computed<DropdownOption[]>(() => [
       'aria-hidden': 'true',
     }, toolTraceVisible.value ? '✓' : ''),
   },
-  {
-    label: t('chat.pushEnabled'),
-    key: 'pushEnabled',
-    disabled: !chatStore.activeSessionId,
-    icon: () => h('span', {
-      class: ['settings-check', { active: Boolean(chatStore.activeSession?.pushEnabled) }],
-      'aria-hidden': 'true',
-    }, chatStore.activeSession?.pushEnabled ? '✓' : ''),
-  },
 ])
 
 function readDraftMap(): DraftMap {
@@ -568,7 +569,7 @@ onMounted(() => {
   })
 })
 
-async function handleInputSettingsSelect(key: string | number) {
+function handleInputSettingsSelect(key: string | number) {
   if (key === 'voiceMode') {
     if (chatStore.activeSessionId) emit('voiceClick')
     return
@@ -577,28 +578,6 @@ async function handleInputSettingsSelect(key: string | number) {
   if (key === 'toolTrace') {
     toggleToolTraceVisible()
     return
-  }
-
-  if (key === 'pushEnabled') {
-    const sessionId = chatStore.activeSessionId
-    if (!sessionId) return
-    const nextEnabled = !Boolean(chatStore.activeSession?.pushEnabled)
-    if (nextEnabled) {
-      try {
-        const platforms = await fetchSocialMessagePlatforms()
-        const pushReady = platforms.some(platform => (
-          platform.active && platform.configured && platform.pushReady
-        ))
-        if (!pushReady) {
-          message.warning(t('chat.pushNotConfigured'))
-          return
-        }
-      } catch {
-        message.warning(t('chat.pushNotConfigured'))
-        return
-      }
-    }
-    await chatStore.setSessionPushEnabled(sessionId, nextEnabled)
   }
 }
 
@@ -841,6 +820,7 @@ function currentContextLengthKey() {
 }
 
 async function loadContextLength() {
+  if (showSessionUsage.value) return
   const key = currentContextLengthKey()
   if (key === contextLengthLoadedKey) return
   if (key === contextLengthRequestKey && contextLengthRequest) return contextLengthRequest
@@ -878,12 +858,20 @@ watch(
     chatStore.activeSession?.provider,
     chatStore.activeSession?.model,
     chatStore.activeSession?.source,
+    chatStore.activeSession?.agent,
+    chatStore.activeSession?.codingAgentId,
   ],
   loadContextLength,
   { flush: 'post' },
 )
 
+const cumulativeTokens = computed(() => {
+  const session = chatStore.activeSession
+  return (session?.inputTokens ?? 0) + (session?.outputTokens ?? 0)
+    + (session?.cacheReadTokens ?? 0) + (session?.cacheWriteTokens ?? 0)
+})
 const totalTokens = computed(() => {
+  if (showSessionUsage.value) return cumulativeTokens.value
   const context = chatStore.activeSession?.contextTokens
   if (typeof context === 'number' && Number.isFinite(context) && context > 0) return context
   const input = chatStore.activeSession?.inputTokens ?? 0
@@ -891,6 +879,7 @@ const totalTokens = computed(() => {
   return input + output
 })
 const showContextUsage = computed(() => !!chatStore.activeSession)
+const showContextLimit = computed(() => !showSessionUsage.value)
 
 const remainingTokens = computed(() => Math.max(0, contextLength.value - totalTokens.value))
 
@@ -1245,19 +1234,23 @@ function openAttachmentPreview(attachment: Attachment) {
         @dblclick="resetTextareaHeight"
       ></div>
       <div v-if="showContextUsage" class="context-usage-row">
-        <span class="context-info" :class="{ 'context-warning': usagePercent > 80 }">
-          {{ formatTokens(totalTokens) }} /
-          <NTooltip trigger="hover" :disabled="isMobileViewport">
-            <template #trigger>
-              <span class="context-limit-editable" @click="handleEditContextLimit">
-                {{ formatTokens(contextLength) }}
-              </span>
-            </template>
-            <span>{{ t('chat.contextClickToEdit') }}</span>
-          </NTooltip>
-          · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
+        <span class="context-info" :class="{ 'context-warning': showContextLimit && usagePercent > 80 }">
+          <template v-if="showSessionUsage">{{ t('chat.sessionUsage') }} </template>
+          {{ formatTokens(totalTokens) }}
+          <template v-if="showContextLimit">
+            /
+            <NTooltip trigger="hover" :disabled="isMobileViewport">
+              <template #trigger>
+                <span class="context-limit-editable" @click="handleEditContextLimit">
+                  {{ formatTokens(contextLength) }}
+                </span>
+              </template>
+              <span>{{ t('chat.contextClickToEdit') }}</span>
+            </NTooltip>
+            · {{ t('chat.contextRemaining') }} {{ formatTokens(remainingTokens) }}
+          </template>
         </span>
-        <div class="context-bar">
+        <div v-if="showContextLimit" class="context-bar">
           <div
             class="context-bar-fill"
             :class="{

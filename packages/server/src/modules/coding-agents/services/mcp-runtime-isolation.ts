@@ -17,6 +17,7 @@ const STUDIO_MANAGED_NAMES = new Set([
   'ekko-studio-devices',
   'ekko-studio-use',
   'ekko-studio-plan',
+  'ekko-studio-interaction',
 ])
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
 const PROBE_TIMEOUT_MS = 5_000
@@ -235,7 +236,7 @@ export async function isolateUnhealthyRuntimeMcpServers(
   configPath: string,
   options: { probe?: typeof probeCodingAgentMcpConfig } = {},
 ): Promise<string[]> {
-  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'].includes(agentId)) return []
+  if (!['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(agentId)) return []
   let content: string
   try {
     content = await readFile(configPath, 'utf-8')
@@ -250,7 +251,7 @@ export async function isolateUnhealthyRuntimeMcpServers(
           try { assertDshMcpProbeIsLiteral(content, name); return true }
           catch { return false }
         }))
-      : agentId === 'claude-code' || agentId === 'pi'
+      : agentId === 'claude-code' || agentId === 'pi' || agentId === 'cursor'
       ? jsonMcpServers(content)
       : agentId === 'opencode'
         ? openCodeMcpServers(content)
@@ -266,7 +267,7 @@ export async function isolateUnhealthyRuntimeMcpServers(
   let updated = content
   if (agentId === 'dsh') {
     for (const name of unhealthy.keys()) updated = updateDshMcpServer(updated, name, { ...servers[name], enabled: false })
-  } else if (agentId === 'claude-code' || agentId === 'pi') {
+  } else if (agentId === 'claude-code' || agentId === 'pi' || agentId === 'cursor') {
     const parsed = JSON.parse(content || '{}') as Record<string, any>
     const mcpServers = isRecord(parsed.mcpServers) ? { ...parsed.mcpServers } : {}
     for (const name of unhealthy.keys()) delete mcpServers[name]
