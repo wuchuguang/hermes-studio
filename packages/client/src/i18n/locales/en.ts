@@ -365,6 +365,7 @@ export default {
 
   // Common
   common: {
+    close: 'Close',
     loading: 'Loading...',
     cancel: 'Cancel',
     delete: 'Delete',
@@ -468,6 +469,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "API Relay",
+    headline: "Leading AI models, one gateway",
+    description: "APIKEY.FAN is Ekko Studio’s partner API gateway, offering unified access to Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek, and MiniMax. It is compatible with official APIs and SDKs.",
+    zhipu: "Zhipu",
+    viewNow: "View now",
+    apiCompatible: "Official API compatibility",
+    usageTitle: "Key usage",
+    usageScope: "Includes your accessible profiles. The same service and key share one card; different keys are shown separately.",
+    loadFailed: "Unable to load usage. Refresh to try again.",
+    remaining: "Remaining quota",
+    sources: "Configured in",
+    keyActive: "Key active",
+    keyInactive: "Key inactive",
+    requests: "Requests",
+    spend: "Spend",
+    today: "Today",
+    total: "Total",
+    modelUsage: "Usage by model",
+    model: "Model",
+    errors: {
+      unauthorized: "Key authentication failed. Check the configured key.",
+      timeout: "The usage request timed out. Refresh to try again.",
+      unavailable: "The usage service is unavailable. Refresh to try again.",
+      invalid_response: "The service returned an unrecognized usage response.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Preparing update",
     desktopUpdateStopping: "Stopping download…",
@@ -569,6 +598,7 @@ export default {
     ekkoDescription: 'Ekko ships with Studio and does not need separate installation, updates, or removal.',
     version: 'Version',
     codingAgentDescription: 'Studio can install, check for updates, and remove this Agent.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Install the Cursor CLI (`agent`) from https://cursor.com/install, then refresh. Studio does not install it with npm.',
     cursorNoManagedConfig: 'Launch does not rewrite ~/.cursor/mcp.json. Managed servers live in this session\'s runtime copy.',
     updateToVersion: 'Update to {version}',
@@ -1013,6 +1043,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "Output tokens",
+    runUsageInput: "Input tokens",
+    runUsageCacheRate: "Cache hit rate",
+    runUsageCacheRateHint: "Cache-read tokens / all input tokens in this run, including cache reads and writes.",
+    runUsageCache: "Cache hits",
+    runUsageCost: "Est. cost",
+    runUsageSpeed: "Token speed",
+    runUsageSpeedHint: "Run output tokens / total model request time, including first-token latency and excluding tools.",
+    runUsageAverageSpeed: "Average speed",
+    runUsageAverageSpeedHint: "Run output tokens / total run time, including tools and waiting. The CLI did not provide model request time.",
+    runUsageEstimatedSpeed: "Est. speed",
+    runUsageEstimatedSpeedHint: "Output tokens / (run time − tool time). Overlapping tools count once. Includes startup and network overhead; not measured model speed.",
+
     contextRemaining: 'remaining',
     contextClickToEdit: 'Click to edit context length',
     contextEditTitle: 'Edit Context Length',
@@ -1225,6 +1268,9 @@ export default {
     newCliChat: 'New CLI',
     deleteSession: 'Delete this session?',
     sessionDeleted: 'Session deleted',
+    sessionListActions: 'Session list actions',
+    filterByProfile: 'Filter by Profile',
+    selectedSessions: '{count} selected',
     toggleBatchMode: 'Batch selection',
     selectAll: 'Select all',
     confirmBatchDelete: 'Delete {count} selected sessions?',
@@ -1311,6 +1357,7 @@ export default {
     modelSet: 'Model set',
     modelSwitching: 'Switching model...',
     modelSetFailed: 'Failed to set model',
+    builtinAgent: 'Built-in Agent',
     other: 'Other',
     runFailed: 'Run failed',
     error: 'Error',
@@ -1344,6 +1391,7 @@ export default {
   },
 
   workflow: {
+    listActions: 'Workflow list actions',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profile',
@@ -1816,6 +1864,7 @@ export default {
 
   // Skills
   skills: {
+    filterBySource: "Filter by source",
     title: 'Skills',
     targetFilter: 'Runtime',
     targets: {
@@ -2029,10 +2078,6 @@ export default {
 
   // Models
   models: {
-    opencodeFreeHint: "No account or API key required. Free models may be rate limited.",
-    opencodeFreeLoading: "Loading free models in the background…",
-    opencodeFreeRetry: "Free provider check or catalog refresh failed. Retrying automatically; cached models are retained.",
-    opencodeFreeUpgrade: "Update Hermes Agent to use OpenCode Free.",
     title: 'Models',
     searchPlaceholder: 'Search models...',
     noResults: 'No results',
@@ -2409,6 +2454,10 @@ export default {
 
   // Logs
   logs: {
+    file: "Log file",
+    level: "Log level",
+    lines: "Lines",
+    filters: "Filter logs",
     title: 'Logs',
     all: 'All',
     searchPlaceholder: 'Search...',
@@ -3580,6 +3629,26 @@ export default {
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Not recorded",
+      partial: "Partial cost; some usage is unpriced",
+      reported: "Provider-reported cost",
+      estimated: "Estimated cost",
+      mixed: "Includes reported and estimated costs",
+    },
+    pricing: {
+      title: "Model pricing",
+      selectionHelp: "Select a configured provider and model, or type an ID and press Enter.",
+      catalogError: "Could not load configured providers and models. You can still enter IDs manually.",
+      help: "Without a custom price, models.dev is used to estimate costs for matching models. USD per million tokens. Match provider and model IDs exactly (e.g. global). Used only when no cost is returned. Blank cache rates mean unknown. Changes apply to future calls; historical costs are not recalculated.",
+      provider: "Provider ID",
+      model: "Model ID",
+      input: "Input",
+      output: "Output",
+      cacheRead: "Cache read",
+      cacheWrite: "Cache write",
+      error: "Could not load or save pricing. Check provider/model IDs, duplicates and non-negative rates.",
+    },
     title: 'Usage Statistics',
     refresh: 'Refresh',
     totalTokens: 'Total Tokens',
@@ -3591,7 +3660,7 @@ export default {
     cacheHitRate: 'Cache Hit Rate',
     modelBreakdown: 'Model Breakdown',
     agentBreakdown: 'Agent Breakdown',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Unknown' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: 'Unknown' },
     dailyTrend: 'Daily Usage',
     date: 'Date',
     tokens: 'Tokens',
@@ -3710,6 +3779,30 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_7_29_1: 'Restored file downloads from workspace tree menus and diff toolbars in chats and group chats (#3268)',
+    new_0_7_29_2: 'Fixed Antigravity being mislabeled as Ekko in Live Activity notifications (#3272)',
+    new_0_7_28_1: 'Added Antigravity CLI for chat, group chats, and workflows in global and scoped modes, with native settings, MCP, and skills management (#3256)',
+    new_0_7_28_2: 'Added an APIKEY.FAN relay page with balance, daily and total usage, and model breakdowns for configured API keys (#3257)',
+    new_0_7_28_3: 'Fixed Coding Agent manual update status and detection of the updated CLI version, with protection for active sessions (#3261)',
+    new_0_7_28_4: 'Fixed early completion, missing text, and duplicate Claude replies, preserving the complete final output (#3260, #3263)',
+    new_0_7_28_5: 'Fixed native login credential access for Antigravity global mode on macOS and corrected the sign-in hint (#3266)',
+    new_0_7_28_6: 'Updated Device Connections navigation to a monitor and phone icon for a clearer connection entry point (#3262)',
+    new_0_7_27_1: 'Added persisted per-turn usage cards showing tokens, cache hits, costs, and token speed (#3241)',
+    new_0_7_27_2: 'Fixed Coding Agent usage attribution, per-call costs, and cumulative totals; retained interrupted-run usage and updated late accounting (#3246)',
+    new_0_7_27_3: 'Added per-turn usage cards inside group chat reply bubbles, with usage restored when loading history (#3248)',
+    new_0_7_27_4: 'Added configured provider and model selection for custom pricing, with manual ID entry and clearer loading errors (#3253)',
+    new_0_7_27_5: 'Recovered Codex sessions after context overflow: the next message starts with fresh context while keeping Studio history and the workspace (#3204)',
+    new_0_7_27_6: 'Fixed Grok message role compatibility when using DeepSeek Chat Completions (#3244)',
+    new_0_7_27_7: 'Fixed blank conversation history when switching profiles on the same connection (#3242)',
+    new_0_7_27_8: 'Unified Studio drawer sizes and workspace picker layouts, fixed group Agent settings drawer layering and loading, and prevented accidental session renaming with Enter (#3247)',
+    new_0_7_26_1: 'Unified Studio navigation, page headers, and list actions, with improved mobile layouts (#3232)',
+    new_0_7_26_2: 'Unified page loading feedback and improved logo loading visibility, including reduced-motion mode (#3232, #3236)',
+    new_0_7_26_3: 'Improved custom backgrounds and glass layers, fixed window edges and rounded corners, and made microphone buttons follow theme colors (#3236)',
+    new_0_7_26_4: 'Adjusted desktop window control placement and styling by platform while preserving native Windows rounded corners (#3234, #3235)',
+    new_0_7_26_5: 'Made Gateway auto-start opt-in, removed CLI checks from Profile list loading, and fixed initial message bubble rendering (#3233)',
+    new_0_7_26_6: 'Added usage cost recording and custom model pricing, with estimates from the local model catalog and improved context-limit matching (#3226)',
+    new_0_7_26_7: 'Added compatibility with DSH registry presets and native plugin configuration, and fixed plugin pages not filling the available space (#3218)',
+    new_0_7_26_8: 'Fixed Cursor logo visibility on light Agent Manager cards (#3222)',
     new_0_7_25_1: 'Added Cursor CLI support for chat, group chats, and workflows, with native settings, skills management, and isolated Studio MCP (#3110)',
     new_0_7_25_2: 'Added configurable JEV memory recall, relevance filtering, write review, skill matching, and learning preflight (#3159, #3161, #3169)',
     new_0_7_25_3: 'Added optional JEV browser target matching and action verification, group summary review and message routing, and workflow quality checks (#3208, #3211)',

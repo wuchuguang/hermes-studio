@@ -10,9 +10,11 @@ const sessionScrollPositions = new Map<string, MessageViewportScrollSnapshot>();
 </script>
 
 <script setup lang="ts">
+import { NSpin, NButton, NInput } from 'naive-ui'
+import { usePageLoadingTask } from '@/composables/usePageLoading'
 import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { NButton, NInput, NSpin } from "naive-ui";
+
 import VirtualMessageList from "./VirtualMessageList.vue";
 import MessageItem from "./MessageItem.vue";
 import { positionTaskPlansAtTurnEnd } from "@/utils/task-plan";
@@ -49,6 +51,7 @@ const isSearchFetching = computed(() => !!chatStore.focusMessageId && chatStore.
 const isSearchLoading = computed(() => !!chatStore.focusMessageId && (
   chatStore.isLoadingMessages || isPositioningSearch.value
 ));
+usePageLoadingTask(() => isSearchLoading.value);
 const thinkingElapsedMs = ref(0);
 const initialBottomScrollOptions = { frames: 8, keepAliveMs: 1200 };
 let thinkingStartedAt = 0;
@@ -211,7 +214,8 @@ function hasRenderableAssistantContent(message: Message): boolean {
   return !!(
     assistantMessageBody(message) ||
     message.attachments?.length ||
-    message.workspaceChanges?.length
+    message.workspaceChanges?.length ||
+    message.runUsage
   );
 }
 
@@ -275,7 +279,7 @@ const displayMessagesWithForkDivider = computed<Message[]>(() => {
 const canForkActiveSession = computed(() => {
   const session = chatStore.activeSession;
   const hasConversation = displayMessages.value.some((message) => message.role === "user" || message.role === "assistant");
-  return !!session && session.source !== "coding_agent" && !chatStore.isStreaming && !chatStore.isForkPending && hasConversation;
+  return !!session && session.source !== "coding_agent" && session.source !== "builtin_agent" && !chatStore.isStreaming && !chatStore.isForkPending && hasConversation;
 });
 
 const lastForkActionMessageId = computed(() => {
@@ -306,9 +310,9 @@ const canInsertQueuedMessages = computed(() => {
   if (!session) return false;
   const agent = session.codingAgentId || session.agent;
   if (agent === "ekko-agent") {
-    return session.source === "coding_agent" || session.source === "global_agent";
+    return session.source === "builtin_agent" || session.source === "coding_agent" || session.source === "global_agent";
   }
-  if (agent === "codex" || agent === "pi" || agent === "grok" || agent === "cursor" || (agent === "opencode" || agent === "dsh") || agent === "claude" || agent === "claude-code") return true;
+  if (agent === "codex" || agent === "pi" || agent === "grok" || agent === "antigravity" || agent === "cursor" || (agent === "opencode" || agent === "dsh") || agent === "claude" || agent === "claude-code") return true;
   return !session.source || session.source === "cli" || session.source === "global_agent";
 });
 const visibleApproval = computed(() => chatStore.activePendingApproval);
@@ -735,7 +739,7 @@ defineExpose({
           v-else-if="chatStore.activeSession?.hasMoreBefore || chatStore.activeSession?.isLoadingOlderMessages"
           class="history-loader"
         >
-          <span v-if="chatStore.activeSession?.isLoadingOlderMessages" class="history-loader-spinner"></span>
+          <span v-if="chatStore.activeSession?.isLoadingOlderMessages" class="history-loader-spinner" role="status" :aria-label="t('common.loading')"></span>
         </div>
       </template>
       <template #item="{ message: msg }">
@@ -950,11 +954,7 @@ defineExpose({
       </template>
     </VirtualMessageList>
     <div v-if="isSearchLoading" class="message-search-loading" role="status" :aria-label="t('common.loading')">
-      <NSpin size="medium" :rotate="false" :description="t('common.loading')">
-        <template #icon>
-          <span class="message-search-spinner" aria-hidden="true" />
-        </template>
-      </NSpin>
+      <NSpin :description="t('common.loading')" />
     </div>
     <button
       v-if="showScrollBottomButton && !isSearchLoading"
@@ -1144,25 +1144,6 @@ defineExpose({
   display: grid;
   place-items: center;
   background: $bg-main-surface;
-}
-
-// Animate only the composited transform. SVG stroke animations need repainting
-// on the same main thread that is mounting and measuring the message list.
-.message-search-spinner {
-  display: block;
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  border: 3px solid transparent;
-  border-top-color: currentColor;
-  border-inline-end-color: currentColor;
-  border-radius: 50%;
-  will-change: transform;
-  animation: message-search-spin 0.8s linear infinite;
-}
-
-@keyframes message-search-spin {
-  to { transform: rotate(360deg); }
 }
 
 .message-float-stack {
@@ -1605,14 +1586,6 @@ defineExpose({
   }
 }
 
-.history-loader {
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-}
-
 .history-loader-spinner {
   width: 14px;
   height: 14px;
@@ -1626,6 +1599,15 @@ defineExpose({
     border-top-color: $accent-primary;
   }
 }
+
+.history-loader {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
 
 .history-archive-link-wrap {
   display: flex;

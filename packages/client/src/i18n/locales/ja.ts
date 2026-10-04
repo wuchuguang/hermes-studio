@@ -377,6 +377,7 @@ export default {
 
   // 共通
   common: {
+    close: '閉じる',
     loading: '読み込み中...',
     cancel: 'キャンセル',
     retry: '再試行',
@@ -480,6 +481,34 @@ export default {
     toolsClearExcluded: '除外をクリア',
   },
 
+  apiRelay: {
+    title: "APIリレー",
+    headline: "主要なAIモデルを一つの窓口で",
+    description: "APIKEY.FANはEkko Studioの提携APIゲートウェイです。Claude、ChatGPT、Grok、Gemini、Zhipu、Kimi、DeepSeek、MiniMaxに統一APIで接続でき、公式APIとSDKに対応しています。",
+    zhipu: "Zhipu",
+    viewNow: "今すぐ見る",
+    apiCompatible: "公式API互換",
+    usageTitle: "キーの使用量",
+    usageScope: "アクセス可能なプロファイルが対象です。同じサービスとキーは1枚のカードにまとめ、異なるキーは個別に表示します。",
+    loadFailed: "使用量を読み込めません。更新して再試行してください。",
+    remaining: "残りの割り当て",
+    sources: "設定元",
+    keyActive: "キーは有効",
+    keyInactive: "キーは無効",
+    requests: "リクエスト数",
+    spend: "費用",
+    today: "今日",
+    total: "累計",
+    modelUsage: "モデル別の使用量",
+    model: "モデル",
+    errors: {
+      unauthorized: "キー認証に失敗しました。設定したキーを確認してください。",
+      timeout: "使用量の取得がタイムアウトしました。更新して再試行してください。",
+      unavailable: "使用量サービスに接続できません。更新して再試行してください。",
+      invalid_response: "使用量の応答形式を認識できません。",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "更新を準備中",
     desktopUpdateStopping: "ダウンロードを停止中…",
@@ -581,6 +610,7 @@ export default {
     ekkoDescription: 'Ekko は Studio に同梱されているため、個別のインストール、更新、削除は不要です。',
     version: 'バージョン',
     codingAgentDescription: 'Studio からインストール、更新確認、削除ができます。',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Cursor CLI（`agent`）は https://cursor.com/install からインストールし、その後更新してください。Studio は npm ではインストールしません。',
     cursorNoManagedConfig: '起動時に ~/.cursor/mcp.json は書き換えられません。管理対象サーバーは今回のセッションのランタイムコピーにあります。',
     updateToVersion: '{version} に更新',
@@ -979,6 +1009,19 @@ export default {
 
   // チャット
   chat: {
+    runUsageOutput: "出力 token",
+    runUsageInput: "入力 token",
+    runUsageCacheRate: "キャッシュ命中率",
+    runUsageCacheRateHint: "キャッシュ読み取り token ÷ この実行の全入力 token（キャッシュの読み書きを含む）。",
+    runUsageCache: "キャッシュヒット",
+    runUsageCost: "推定費用",
+    runUsageSpeed: "Token 速度",
+    runUsageSpeedHint: "実行の出力 token ÷ モデル要求の合計時間。最初の token の待機を含み、ツール実行を除きます。",
+    runUsageAverageSpeed: "平均速度",
+    runUsageAverageSpeedHint: "この実行の出力トークン数 / ツール実行と待機を含む合計時間。CLI はモデルのリクエスト時間を提供していません。",
+    runUsageEstimatedSpeed: "推定速度",
+    runUsageEstimatedSpeedHint: "出力トークン /（実行時間 − ツール時間）。並列ツールの重複時間は一度だけ除外。起動や通信の時間を含むため、モデルの実測速度ではありません。",
+
     contextRemaining: '残り',
     contextClickToEdit: 'クリックしてコンテキスト長を編集',
     contextEditTitle: 'コンテキスト長を編集',
@@ -1147,6 +1190,9 @@ export default {
     interactionCountdown: '残り {time}',
     interactionCountdownElapsed: '00:00 · サーバー確認待ち',
     deleteSession: 'このセッションを削除しますか？',
+    sessionListActions: 'セッション一覧の操作',
+    filterByProfile: 'プロファイルで絞り込み',
+    selectedSessions: '{count} 件選択中',
     toggleBatchMode: '一括選択',
     selectAll: 'すべて選択',
     confirmBatchDelete: '{count}件のセッションを削除しますか？',
@@ -1193,6 +1239,7 @@ export default {
     renameSession: 'セッション名の変更',
     sessionNotFound: 'セッションが見つかりません',
     enterNewTitle: '新しいタイトルを入力',
+    builtinAgent: '組み込み Agent',
     other: 'その他',
     runFailed: '実行に失敗しました',
     error: 'エラー',
@@ -1378,6 +1425,7 @@ export default {
 
   // スキル
   skills: {
+    filterBySource: "ソースで絞り込む",
     title: 'スキル',
     targetFilter: 'ランタイム',
     targets: {
@@ -1591,10 +1639,6 @@ export default {
 
   // モデル
   models: {
-    opencodeFreeHint: "アカウントや API キーは不要です。無料モデルには利用制限があります。",
-    opencodeFreeLoading: "無料モデルをバックグラウンドで読み込み中…",
-    opencodeFreeRetry: "プロバイダーの確認または一覧の更新に失敗しました。キャッシュを保持して自動で再試行します。",
-    opencodeFreeUpgrade: "OpenCode Free を使うには Hermes Agent を更新してください。",
     title: 'モデル',
     addProvider: 'プロバイダーを追加',
     noProviderPromptTitle: 'モデルプロバイダーが設定されていません',
@@ -1924,6 +1968,10 @@ export default {
 
   // ログ
   logs: {
+    file: "ログファイル",
+    level: "ログレベル",
+    lines: "行数",
+    filters: "ログを絞り込む",
     title: 'ログ',
     all: 'すべて',
     searchPlaceholder: '検索...',
@@ -2806,6 +2854,26 @@ export default {
 
   // 使用統計
   usage: {
+    costStates: {
+      unknown: "未記録",
+      partial: "一部の費用のみ記録",
+      reported: "プロバイダー報告額",
+      estimated: "推定費用",
+      mixed: "報告額と推定額を含む",
+    },
+    pricing: {
+      title: "モデル料金",
+      selectionHelp: "設定済みのプロバイダーとモデルを選択するか、ID を入力して Enter キーを押してください。",
+      catalogError: "設定済みのプロバイダーとモデルを読み込めませんでした。ID は手動で入力できます。",
+      help: "カスタム料金が未設定の場合、一致するモデルの models.dev 料金で推定します。100万トークンあたりの米ドル。プロバイダーとモデルの ID を完全一致で指定（例: global）。費用が返されない場合のみ推定します。キャッシュ料金の空欄は不明を意味します。変更は今後の呼び出しに適用され、過去の費用は再計算されません。",
+      provider: "プロバイダー ID",
+      model: "モデル ID",
+      input: "入力",
+      output: "出力",
+      cacheRead: "キャッシュ読取",
+      cacheWrite: "キャッシュ書込",
+      error: "料金の読み込みまたは保存に失敗しました。ID、重複、負の料金がないか確認してください。",
+    },
     title: '使用統計',
     refresh: '更新',
     totalTokens: '総トークン数',
@@ -2817,7 +2885,7 @@ export default {
     cacheHitRate: 'キャッシュヒット率',
     modelBreakdown: 'モデル別内訳',
     agentBreakdown: 'Agent 別内訳',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: '不明' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: '不明' },
     dailyTrend: '日別使用量',
     date: '日付',
     tokens: 'トークン',
@@ -2852,6 +2920,7 @@ export default {
   },
 
   workflow: {
+    listActions: 'ワークフロー一覧の操作',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'ワークフロー',
     profile: 'プロファイル',
@@ -3261,6 +3330,30 @@ export default {
   },
 
   changelog: {
+    new_0_7_29_1: 'チャットとグループチャットのワークスペースで、ファイルツリーメニューと差分ツールバーからのファイルダウンロードを復元しました (#3268)',
+    new_0_7_29_2: 'ライブアクティビティ通知で Antigravity が Ekko と誤表示される問題を修正しました (#3272)',
+    new_0_7_28_1: 'Antigravity CLI を追加し、global・scoped モードのチャット、グループチャット、ワークフローと、ネイティブ設定、MCP、スキル管理に対応 (#3256)',
+    new_0_7_28_2: 'APIKEY.FAN 中継サービスのページを追加し、設定済み API キーごとの残高、当日・累計使用量、モデル別内訳を表示 (#3257)',
+    new_0_7_28_3: 'Coding Agent の手動更新確認後の状態と更新済み CLI バージョンの検出を修正し、実行中のセッションを保護 (#3261)',
+    new_0_7_28_4: 'Claude の応答が早期終了する問題、テキストの欠落や重複を修正し、最終出力を完全に保存 (#3260, #3263)',
+    new_0_7_28_5: 'macOS の Antigravity global モードでネイティブのログイン認証情報を読み取れない問題と、ログイン案内を修正 (#3266)',
+    new_0_7_28_6: 'デバイス接続のナビゲーションをモニターとスマートフォンのアイコンに変更し、接続先への入口を明確化 (#3262)',
+    new_0_7_27_1: '会話の各ターンに保存される使用量カードを追加し、Token、キャッシュヒット、費用、出力速度を表示 (#3241)',
+    new_0_7_27_2: 'Coding Agent の使用量の帰属、呼び出しごとの費用、累計を修正し、中断時の使用量を保持して遅れて届いた集計を反映 (#3246)',
+    new_0_7_27_3: 'グループチャットの返信バブル内にターンごとの使用量カードを追加し、履歴の読み込み時にも復元 (#3248)',
+    new_0_7_27_4: 'カスタム料金の設定で構成済みのプロバイダーとモデルを選択可能にし、ID の手入力と読み込みエラー表示を改善 (#3253)',
+    new_0_7_27_5: 'Codex のコンテキスト超過後の復旧を修正。次のメッセージは新しいコンテキストで続行し、Studio の履歴とワークスペースを保持 (#3204)',
+    new_0_7_27_6: 'DeepSeek Chat Completions を使用する際の Grok のメッセージロール互換性を修正 (#3244)',
+    new_0_7_27_7: '同じ接続で Profile を切り替えた後に会話履歴が空白になる問題を修正 (#3242)',
+    new_0_7_27_8: 'Studio のドロワーサイズとワークスペース選択画面を統一し、グループ Agent 設定の重なりと読み込みを修正。Enter による意図しない会話名変更を防止 (#3247)',
+    new_0_7_26_1: 'Studio のナビゲーション、ページヘッダー、一覧操作を統一し、モバイルレイアウトを改善 (#3232)',
+    new_0_7_26_2: 'ページ読み込み表示を統一し、動きを減らす設定時を含め、ロゴの読み込み表示を改善 (#3232, #3236)',
+    new_0_7_26_3: 'カスタム背景とガラス効果の階層を改善し、ウィンドウの縁と角丸を修正。マイクボタンをテーマの配色に対応 (#3236)',
+    new_0_7_26_4: 'プラットフォームに合わせてデスクトップのウィンドウ操作ボタンの位置とスタイルを調整し、Windows 標準の角丸を維持 (#3234, #3235)',
+    new_0_7_26_5: 'Gateway の自動起動を明示的な有効化が必要な設定に変更し、Profile 一覧の読み込みから CLI チェックを分離。メッセージ吹き出しの初回描画を修正 (#3233)',
+    new_0_7_26_6: '使用料金の記録とモデル単価のカスタマイズを追加。ローカルモデルカタログによる料金見積もりに対応し、コンテキスト上限の照合を改善 (#3226)',
+    new_0_7_26_7: 'DSH レジストリのプリセットとネイティブプラグイン設定に対応し、プラグインページが表示領域全体を使わない問題を修正 (#3218)',
+    new_0_7_26_8: 'Agent Manager の明るいカード上で Cursor ロゴが見えにくい問題を修正 (#3222)',
     new_0_7_25_1: 'チャット、グループチャット、ワークフローで Cursor CLI に対応し、ネイティブ設定、スキル管理、分離された Studio MCP 設定を追加 (#3110)',
     new_0_7_25_2: '設定可能な JEV の記憶検索、関連性フィルタリング、書き込みレビュー、スキル照合、学習事前チェックを追加 (#3159, #3161, #3169)',
     new_0_7_25_3: '任意で有効にできる JEV のブラウザー対象照合と操作検証、グループ要約レビューとメッセージ振り分け、ワークフロー品質チェックを追加 (#3208, #3211)',

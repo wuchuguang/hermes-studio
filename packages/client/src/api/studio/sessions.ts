@@ -112,6 +112,7 @@ export interface HermesSessionPage {
 }
 
 export interface HermesMessage {
+  run_usage?: import('@/utils/run-usage').RunUsageSummary
   id: number
   session_id: string
   role: 'user' | 'assistant' | 'system' | 'tool' | 'command' | 'moa'
@@ -373,7 +374,7 @@ export async function fetchHermesSessionGroups(
   profile?: string | null,
   includedSessionIds: string[] = [],
 ): Promise<HermesSessionGroupsResult> {
-  const params = new URLSearchParams({ limit: String(limit) })
+  const params = new URLSearchParams({ limit: String(limit), agent_groups: '1' })
   if (profile) params.set('profile', profile)
   for (const sessionId of includedSessionIds) params.append('include', sessionId)
   return request<HermesSessionGroupsResult>(`/api/studio/sessions/hermes/groups?${params}`)
@@ -389,6 +390,7 @@ export async function fetchHermesSessionPage(
     source,
     offset: String(offset),
     limit: String(limit),
+    agent_groups: '1',
   })
   if (profile) params.set('profile', profile)
   return request<HermesSessionPage>(`/api/studio/sessions/hermes?${params}`)
@@ -685,6 +687,7 @@ export async function saveSessionToObsidian(id: string): Promise<{ ok: boolean; 
 }
 
 export interface UsageStatsResponse {
+  cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   total_input_tokens: number
   total_output_tokens: number
   total_cache_read_tokens: number
@@ -721,6 +724,7 @@ export interface UsageStatsResponse {
     sessions: number
     errors: number
     cost: number
+    cost_coverage?: import('@/utils/usage-cost').UsageCostCoverage
   }>
 }
 

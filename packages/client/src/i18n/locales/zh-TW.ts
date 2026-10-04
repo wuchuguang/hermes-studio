@@ -365,6 +365,7 @@ export default {
 
   // 通用
   common: {
+    close: '關閉',
     loading: '載入中...',
     cancel: '取消',
     delete: '刪除',
@@ -468,6 +469,34 @@ export default {
     toolsClearExcluded: '清空排除',
   },
 
+  apiRelay: {
+    title: "API 中轉",
+    headline: "一站接入主流 AI 模型",
+    description: "APIKEY.FAN 是 Ekko Studio 的合作中轉服務，統一接入 Claude、ChatGPT、Grok、Gemini、智譜、Kimi、DeepSeek 和 MiniMax，相容官方 API 與 SDK。",
+    zhipu: "智譜",
+    viewNow: "立即查看",
+    apiCompatible: "相容官方 API",
+    usageTitle: "金鑰用量",
+    usageScope: "涵蓋有權限存取的 Profile。同一服務和金鑰合併顯示，不同金鑰分別統計。",
+    loadFailed: "用量載入失敗，請點擊重新整理重試。",
+    remaining: "剩餘額度",
+    sources: "設定來源",
+    keyActive: "金鑰有效",
+    keyInactive: "金鑰已失效",
+    requests: "請求數",
+    spend: "費用",
+    today: "今日",
+    total: "累計",
+    modelUsage: "按模型查看用量",
+    model: "模型",
+    errors: {
+      unauthorized: "金鑰驗證失敗，請檢查設定的金鑰。",
+      timeout: "用量查詢逾時，請點擊重新整理重試。",
+      unavailable: "暫時無法連線用量服務，請點擊重新整理重試。",
+      invalid_response: "無法辨識用量介面傳回的資料格式。",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "正在準備更新",
     desktopUpdateStopping: "正在停止下載…",
@@ -569,6 +598,7 @@ export default {
     ekkoDescription: 'Ekko 隨 Studio 提供，無需單獨安裝、升級或刪除。',
     version: '版本',
     codingAgentDescription: '可由 Studio 安裝、檢查更新及刪除。',
+    antigravityDescription: '通过官方安装指南安装 Antigravity CLI（agy）并在终端完成登录，再刷新。支持全局和模型隔离模式；Studio 不托管安装、更新或卸载。',
     cursorDescription: '請從 https://cursor.com/install 安裝 Cursor CLI（`agent`），然後重新整理。Studio 不會用 npm 安裝。',
     cursorNoManagedConfig: '啟動不會改寫 ~/.cursor/mcp.json。託管服務寫在本次工作階段的執行時副本裡。',
     updateToVersion: '更新至 {version}',
@@ -1006,6 +1036,19 @@ export default {
 
   // 對話
   chat: {
+    runUsageOutput: "輸出 token",
+    runUsageInput: "輸入 token",
+    runUsageCacheRate: "快取命中率",
+    runUsageCacheRateHint: "命中快取的輸入 token ÷ 本輪全部輸入 token（含快取讀取和寫入）",
+    runUsageCache: "快取命中",
+    runUsageCost: "預估費用",
+    runUsageSpeed: "Token 速度",
+    runUsageSpeedHint: "本輪輸出 token ÷ 模型請求總耗時（含首 token 等待，不含工具執行）",
+    runUsageAverageSpeed: "平均速度",
+    runUsageAverageSpeedHint: "本輪輸出 token / 整輪耗時，包含工具執行與等待時間；CLI 未提供模型請求耗時。",
+    runUsageEstimatedSpeed: "估算速度",
+    runUsageEstimatedSpeedHint: "輸出 token /（本輪耗時 − 工具占用時間）。並行工具重疊時間只扣一次；仍包含啟動、網路等開銷，非實測模型速度。",
+
     contextRemaining: '剩餘',
     contextClickToEdit: '點擊編輯上下文長度',
     contextEditTitle: '編輯上下文長度',
@@ -1215,6 +1258,9 @@ export default {
     interactionCountdownElapsed: '00:00 · 等待伺服器確認',
     deleteSession: '確定刪除此工作階段？',
     sessionDeleted: '工作階段已刪除',
+    sessionListActions: '會話列表操作',
+    filterByProfile: '依 Profile 篩選',
+    selectedSessions: '已選 {count} 項',
     toggleBatchMode: '批次選取',
     selectAll: '全選',
     confirmBatchDelete: '確定刪除選取的 {count} 個工作階段？',
@@ -1293,6 +1339,7 @@ export default {
     dirSearchToggle: '搜尋目錄',
     workspaceExtraAdd: '新增目錄',
     workspaceExtraEmpty: '暫無。agent 只能訪問主工作區。',
+    builtinAgent: '內建 Agent',
     other: '其他',
     runFailed: '執行失敗',
     error: '錯誤',
@@ -1337,6 +1384,7 @@ export default {
   },
 
   workflow: {
+    listActions: '工作流列表操作',
     quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '設定檔',
@@ -1850,6 +1898,7 @@ export default {
 
   // 技能
   skills: {
+    filterBySource: "依來源篩選",
     title: '技能',
     targetFilter: '執行環境',
     targets: {
@@ -2063,10 +2112,6 @@ export default {
 
   // 模型
   models: {
-    opencodeFreeHint: "無需帳號或 API key，免費模型可能受到限流。",
-    opencodeFreeLoading: "正在背景載入免費模型…",
-    opencodeFreeRetry: "免費提供商檢查或目錄更新失敗，將自動重試並保留快取模型。",
-    opencodeFreeUpgrade: "請更新 Hermes Agent 以使用 OpenCode Free。",
     title: '模型',
     searchPlaceholder: '搜尋模型...',
     noResults: '無結果',
@@ -2396,6 +2441,10 @@ export default {
 
   // 日誌
   logs: {
+    file: "日誌檔案",
+    level: "日誌等級",
+    lines: "行數",
+    filters: "篩選日誌",
     title: '日誌',
     all: '全部',
     searchPlaceholder: '搜尋...',
@@ -3522,6 +3571,26 @@ export default {
 
   // 用量統計
   usage: {
+    costStates: {
+      unknown: "未記錄",
+      partial: "部分費用，其餘未記錄",
+      reported: "上游回傳費用",
+      estimated: "估算費用",
+      mixed: "含上游費用與估算費用",
+    },
+    pricing: {
+      title: "模型單價",
+      selectionHelp: "可選擇已設定的供應商及其模型，也可輸入 ID 後按 Enter。",
+      catalogError: "無法載入已設定的供應商和模型，仍可手動輸入 ID。",
+      help: "未設定自訂單價時，自動使用 models.dev 中相符模型的價格估算。單位為美元／百萬 Token。依供應商和模型 ID 精確匹配（例如 global），僅在上游未回傳費用時估算。快取單價留空表示未知。修改從後續呼叫生效，不重算歷史費用。",
+      provider: "供應商 ID",
+      model: "模型 ID",
+      input: "輸入",
+      output: "輸出",
+      cacheRead: "快取讀取",
+      cacheWrite: "快取寫入",
+      error: "無法讀取或儲存單價。請檢查供應商、模型是否填寫或重複，單價必須為非負數。",
+    },
     title: '用量統計',
     refresh: '重新整理',
     totalTokens: '總 Token 數',
@@ -3533,7 +3602,7 @@ export default {
     cacheHitRate: '快取命中率',
     modelBreakdown: '模型分布',
     agentBreakdown: 'Agent 分布',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: '未知' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: '未知' },
     dailyTrend: '每日用量',
     date: '日期',
     tokens: 'Token',
@@ -3654,6 +3723,30 @@ export default {
 
   // 更新日誌
   changelog: {
+    new_0_7_29_1: '恢復聊天和群聊工作區檔案樹選單及差異工具列中的檔案下載功能 (#3268)',
+    new_0_7_29_2: '修正即時動態通知將 Antigravity 錯誤識別為 Ekko 的問題 (#3272)',
+    new_0_7_28_1: '新增 Antigravity CLI，支援全域和獨立設定模式下的聊天、群聊與工作流程，並整合原生設定、MCP 和技能管理 (#3256)',
+    new_0_7_28_2: '新增 APIKEY.FAN 中轉服務頁面，可依已設定的 API Key 查看餘額、今日與累計用量及模型明細 (#3257)',
+    new_0_7_28_3: '修正程式開發 Agent 手動檢查更新後的狀態和更新版本辨識，並保護正在執行的工作階段 (#3261)',
+    new_0_7_28_4: '修正 Claude 回覆提早結束、內容遺漏或重複的問題，完整儲存最終輸出 (#3260、#3263)',
+    new_0_7_28_5: '修正 macOS 上 Antigravity 全域模式無法讀取原生登入憑證的問題，並更正登入提示 (#3266)',
+    new_0_7_28_6: '裝置連線導覽改用螢幕與手機圖示，更清楚區分連線入口 (#3262)',
+    new_0_7_27_1: '聊天新增持久保存的每輪用量卡片，顯示 Token、快取命中、費用與輸出速度 (#3241)',
+    new_0_7_27_2: '修復程式開發 Agent 用量歸屬、單次費用與累計統計，保留中斷任務用量並更新延遲回傳的統計 (#3246)',
+    new_0_7_27_3: '群聊回覆氣泡新增每輪用量卡片，載入歷史訊息時可恢復顯示 (#3248)',
+    new_0_7_27_4: '自訂模型定價支援選擇已設定的供應商和模型，保留手動輸入 ID 並改善載入失敗提示 (#3253)',
+    new_0_7_27_5: '修復 Codex 上下文超限後的工作階段恢復，下一則訊息使用新上下文繼續，並保留 Studio 歷史與工作區 (#3204)',
+    new_0_7_27_6: '修復 Grok 使用 DeepSeek Chat Completions 時的訊息角色相容問題 (#3244)',
+    new_0_7_27_7: '修復同一連線切換 Profile 後對話歷史空白的問題 (#3242)',
+    new_0_7_27_8: '統一 Studio 抽屜尺寸和工作區選擇器配置，修復群聊 Agent 設定抽屜的遮擋與載入問題，並避免按 Enter 誤提交工作階段重新命名 (#3247)',
+    new_0_7_26_1: '統一 Studio 導覽列、頁面標題與清單操作，並最佳化行動版配置 (#3232)',
+    new_0_7_26_2: '統一頁面載入回饋，改善 Logo 載入動畫及減少動態效果模式下的可見性 (#3232、#3236)',
+    new_0_7_26_3: '最佳化自訂背景與毛玻璃層次，修復視窗邊緣和圓角銜接，並讓麥克風按鈕跟隨佈景主題配色 (#3236)',
+    new_0_7_26_4: '依平台調整桌面視窗控制按鈕的位置與樣式，並保留 Windows 原生視窗圓角 (#3234、#3235)',
+    new_0_7_26_5: 'Gateway 自動啟動改為明確啟用，Profile 清單載入不再等待 CLI 檢查，並修復訊息氣泡首次繪製 (#3233)',
+    new_0_7_26_6: '用量統計新增費用記錄與自訂模型單價，支援依本機模型目錄估算費用，並改善模型上下文限制比對 (#3226)',
+    new_0_7_26_7: '相容 DSH 登錄表預設與原生外掛設定，修復外掛頁面未填滿可用區域的問題 (#3218)',
+    new_0_7_26_8: '修復 Agent 管理員中 Cursor 圖示在淺色卡片上的顯示 (#3222)',
     new_0_7_25_1: '新增 Cursor CLI 支援，可用於聊天、群組聊天與工作流程，並提供原生設定、技能管理及獨立的 Studio MCP 設定 (#3110)',
     new_0_7_25_2: '新增可設定的 JEV 記憶召回、相關性篩選、寫入審核、技能匹配與學習預先檢查 (#3159, #3161, #3169)',
     new_0_7_25_3: '新增可選的 JEV 瀏覽器目標匹配與操作驗證、群組摘要審核與訊息路由，以及工作流程品質檢查 (#3208, #3211)',

@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import PageSidebar from "@/components/layout/PageSidebar.vue"
+import { usePageSidebarState } from "@/composables/usePageSidebar"
+import { usePageLoadingTask } from '@/composables/usePageLoading'
+import PageHeader from '@/components/layout/PageHeader.vue'
+import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { AGENT_OPTIONS } from "@/utils/agent-options"
 import { setSessionPinned } from "@/api/studio/sessions";
 import DshSessionPresetSelect from "@/components/coding-agents/dsh/DshSessionPresetSelect.vue";
@@ -18,8 +24,8 @@ import {
   type StudioProject,
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
-import { fetchCodingAgentsStatus, inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
-import { agentInstallationState, fetchAgentAvailabilitySnapshot } from "@/api/agent-status";
+import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
+import { agentInstallationState, fetchAgentAvailabilitySnapshot, type AgentAvailabilitySnapshot } from "@/api/agent-status";
 import { useChatStore, type Session } from "@/stores/hermes/chat";
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
@@ -27,6 +33,7 @@ import { useFilesStore } from "@/stores/hermes/files";
 import { useToolPanelStore } from "@/stores/hermes/tool-panel";
 import { useSessionBrowserPrefsStore } from "@/stores/hermes/session-browser-prefs";
 import {
+  NSpin,
   NButton,
   NDrawer,
   NDrawerContent,
@@ -39,7 +46,6 @@ import {
   NPopconfirm,
   NRadioButton,
   NRadioGroup,
-  NSpin,
   useMessage,
   type DropdownOption,
 } from "naive-ui";
@@ -55,6 +61,7 @@ import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
 import MessageList from "./MessageList.vue";
 import SessionListItem from "./SessionListItem.vue";
+import ListActionsMenu from "@/components/layout/ListActionsMenu.vue";
 import OutlinePanel from "./OutlinePanel.vue";
 import TerminalPanel from "./TerminalPanel.vue";
 import SubagentStreamPanel from "./SubagentStreamPanel.vue";
@@ -67,7 +74,7 @@ import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { isStoredSuperAdmin } from "@/api/client";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
-import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth, isKeylessModelProvider, openCodeFreeApiMode } from "@/utils/codingAgentProviders";
+import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
 import { OPEN_SUBAGENT_STREAM_EVENT, type OpenSubagentStreamDetail } from "@/utils/hermes/subagent-stream";
 import { desktopBridge, hasDesktopBrowserBridge } from "@/utils/desktop-bridge";
 import { OPEN_DESKTOP_BROWSER_PANEL_EVENT } from "@/utils/desktop-browser";
@@ -160,26 +167,12 @@ const selectedSessionKeys = ref<Set<string>>(new Set());
 const showBatchDeleteConfirm = ref(false);
 const isBatchDeleting = ref(false);
 
-// Initialize synchronously from the media query so first paint is correct.
-// On narrow viewports the session list is an absolute-positioned overlay
-// (z-index 10) on top of the chat area; if we default to `true`, onMounted
-// only flips it to `false` AFTER the first render, causing a visible flash
-// where the session list covers the chat content ("auto-fixes after a
-// moment" — that was the race).
-const showSessions = ref(
-  !props.standalone && (
-    typeof window === "undefined" ||
-    !window.matchMedia("(max-width: 768px)").matches
-  )
+const { expanded: showSessions, isMobile } = usePageSidebarState(!props.standalone)
+
+const hasPageSidebar = computed(
+  () => !props.standalone && currentMode.value === "chat" && props.contentMode === "chat",
 );
-const pageSidebarExpanded = computed(
-  () => !props.standalone && currentMode.value === "chat" && showSessions.value,
-);
-let mobileQuery: MediaQueryList | null = null;
-const isMobile = ref(
-  typeof window !== "undefined" &&
-  window.matchMedia("(max-width: 768px)").matches,
-);
+const pageSidebarExpanded = computed(() => hasPageSidebar.value && showSessions.value);
 const toolPanelStyle = computed(() => ({
   width: isMobile.value ? "100%" : `min(${toolPanelWidth.value}px, 100%)`,
 }));
@@ -372,6 +365,7 @@ async function handleSessionClick(
     setCategoryRevealSuppressedSessionId(null);
   }
   chatStore.clearSessionCompletedUnread(sessionId);
+  if (isMobile.value) showSessions.value = false;
   await router.push({
     name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
     params: { sessionId },
@@ -379,7 +373,6 @@ async function handleSessionClick(
   if (chatStore.activeSessionId !== sessionId) {
     await chatStore.switchSession(sessionId);
   }
-  if (mobileQuery?.matches) showSessions.value = false;
 }
 
 async function handleRecentSessionClick(sessionId: string) {
@@ -388,16 +381,6 @@ async function handleRecentSessionClick(sessionId: string) {
   await handleSessionClick(sessionId, { preserveCategoryCollapse: true });
 }
 
-function handleMobileChange(e: MediaQueryListEvent | MediaQueryList) {
-  isMobile.value = e.matches;
-  if (e.matches && showSessions.value) {
-    showSessions.value = false;
-  }
-}
-
-function openPageSidebar() {
-  showSessions.value = true;
-}
 
 watch(
   pageSidebarExpanded,
@@ -509,10 +492,9 @@ function handleOpenDesktopBrowserPanelRequest() {
 }
 
 onMounted(() => {
-  mobileQuery = window.matchMedia("(max-width: 768px)");
-  handleMobileChange(mobileQuery);
-  mobileQuery.addEventListener("change", handleMobileChange);
-  window.addEventListener("hermes:open-page-sidebar", openPageSidebar);
+
+
+
   window.addEventListener("hermes:preview-workspace-file", handleWorkspaceFilePreviewRequest);
   window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.addEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
@@ -563,8 +545,8 @@ watch(
 );
 
 onUnmounted(() => {
-  mobileQuery?.removeEventListener("change", handleMobileChange);
-  window.removeEventListener("hermes:open-page-sidebar", openPageSidebar);
+  newChatOptionsLoadSequence++;
+
   window.removeEventListener("hermes:preview-workspace-file", handleWorkspaceFilePreviewRequest);
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.removeEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
@@ -617,6 +599,7 @@ const sessionProfileFilter = computed(() => chatStore.sessionProfileFilter);
 const sessionCategories = ref<SessionCategory[]>([]);
 const sessionCategoriesLoading = ref(false);
 const sessionCategoriesLoaded = ref(false);
+usePageLoadingTask(() => !props.standalone && props.contentMode === 'chat' && !sessionCategoriesLoaded.value);
 const sessionCategoriesLoadFailed = ref(false);
 const showCreateCategoryModal = ref(false);
 const createCategoryValue = ref("");
@@ -680,16 +663,8 @@ function toggleCategoryGroup(key: string) {
   collapsedCategories.value = next;
   persistCollapsedCategories();
 }
-const profileFilterOptions = computed(() => [
-  { label: t("chat.allProfiles"), value: "__all__" },
-  ...profilesStore.profiles.map((profile) => ({
-    label: profile.name,
-    value: profile.name,
-  })),
-]);
-
-async function handleProfileFilterChange(value: string) {
-  chatStore.setSessionProfileFilter(value === "__all__" ? null : value);
+async function handleProfileFilterChange(value: string | null) {
+  chatStore.setSessionProfileFilter(value);
   await chatStore.loadSessions(chatStore.sessionProfileFilter);
 }
 
@@ -848,8 +823,8 @@ const headerTitle = computed(() =>
 );
 
 const showNewChatModal = ref(false);
-const newChatAgentAvailability = ref(new Map<string, { installed: boolean }>());
-const newChatAgent = ref<"hermes" | ChatCodingAgentId>("hermes");
+const newChatAgentAvailability = ref<AgentAvailabilitySnapshot | null>(null);
+const newChatAgent = ref<"hermes" | ChatCodingAgentId>("ekko-agent");
 const newChatAgentMode = ref<"global" | "scoped">("scoped");
 const newChatProfile = ref<string>("default");
 const newChatProvider = ref<string>("");
@@ -867,6 +842,9 @@ const newChatCategoryId = ref<number | null>(null);
 const newChatCategoryCreating = ref(false);
 const newChatCategorySelectRevision = ref(0);
 const newChatLoading = ref(false);
+const newChatAgentLoading = ref(false);
+const newChatModelsLoading = ref(false);
+let newChatOptionsLoadSequence = 0;
 
 const newChatCategoryOptions = computed(() => [
   { label: t("chat.uncategorized"), value: 0 },
@@ -1040,14 +1018,13 @@ const hiddenDefaultWorkspaces = computed(() => {
   return defaultWorkspaces.value.filter(ws => !visible.has(ws));
 });
 
-const newChatAgentOptions = computed(() => {
+const newChatAgentOptions = computed(() =>
   // Hide agents that are not installed on this machine — only offer
   // what the user can actually start a chat with.
-  return AGENT_OPTIONS.filter((option) => {
-    const record = newChatAgentAvailability.value.get(option.value);
-    return !record || record.installed;
-  }).map(option => ({ ...option }));
-});
+  AGENT_OPTIONS.filter(option =>
+    agentInstallationState(newChatAgentAvailability.value, option.value) === "installed",
+  ),
+);
 
 const newChatApiModeOptions = computed(() => [
   { label: t("codingAgents.protocolOpenAiChat"), value: "chat_completions" },
@@ -1065,7 +1042,7 @@ function effectiveNewChatMode(
   requestedMode: typeof newChatAgentMode.value,
 ) {
   if (agent === "ekko-agent") return "scoped";
-  if (agent === "cursor") return "global";
+  if (isGlobalOnlyCodingAgent(agent)) return "global";
   return requestedMode;
 }
 
@@ -1165,7 +1142,7 @@ const selectedNewChatProviderGroup = computed(() =>
 );
 
 const isNewChatCodingAgent = computed(() => newChatAgent.value !== "hermes");
-const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || newChatAgent.value === "cursor" || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
+const isNewChatExternalCodingAgent = computed(() => newChatAgent.value === "claude-code" || newChatAgent.value === "codex" || newChatAgent.value === "pi" || newChatAgent.value === "grok" || (newChatAgent.value === "antigravity" || isNativeCodingAgent(newChatAgent.value)) || isGlobalOnlyCodingAgent(newChatAgent.value) || (newChatAgent.value === "opencode" || newChatAgent.value === "dsh"));
 const effectiveNewChatAgentMode = computed(() =>
   effectiveNewChatMode(newChatAgent.value, newChatAgentMode.value),
 );
@@ -1179,19 +1156,19 @@ const newChatNeedsBaseUrl = computed(() =>
 const newChatUsesServerAuth = computed(() =>
   usesServerManagedProviderAuth(newChatAgent.value as ChatCodingAgentId, selectedNewChatProviderGroup.value?.provider),
 );
-const newChatUsesKeylessProvider = computed(() => isKeylessModelProvider(newChatProvider.value));
 const newChatNeedsApiKey = computed(() =>
   isNewChatCodingAgent.value &&
   effectiveNewChatAgentMode.value === "scoped" &&
   !newChatUsesServerAuth.value &&
-  !newChatUsesKeylessProvider.value &&
   !selectedNewChatProviderGroup.value?.api_key,
 );
 const canConfirmNewChat = computed(() => {
   if (newChatCategoryCreating.value || newChatLoading.value) return false;
+  if (!newChatAgentOptions.value.some(option => option.value === newChatAgent.value)) return false;
   if (newChatAgent.value === "dsh" && (!newChatAgentPreset.value || !newChatPresetReady.value)) return false;
-  if (!newChatProfile.value) return false;
+  if (!profilesStore.profiles.some(profile => profile.name === newChatProfile.value)) return false;
   if (!newChatUsesProviderModel.value) return true;
+  if (newChatModelsLoading.value) return false;
   if (!newChatProvider.value || !newChatModel.value) return false;
   if (!isNewChatCodingAgent.value) return true;
   if (isNewChatCodingAgent.value && effectiveNewChatAgentMode.value === "scoped" && !newChatApiMode.value) return false;
@@ -1201,7 +1178,6 @@ const canConfirmNewChat = computed(() => {
 });
 
 function defaultNewChatApiMode(group?: AvailableModelGroup): CodingAgentApiMode {
-  if (newChatUsesKeylessProvider.value) return openCodeFreeApiMode(newChatModel.value);
   const providerKey = String(group?.provider || newChatProvider.value || "").toLowerCase();
   const baseUrl = String(group?.base_url || newChatBaseUrl.value || "").toLowerCase();
   return normalizeCodingAgentApiMode(
@@ -1213,10 +1189,6 @@ function defaultNewChatApiMode(group?: AvailableModelGroup): CodingAgentApiMode 
 function syncNewChatApiMode() {
   newChatApiMode.value = defaultNewChatApiMode(selectedNewChatProviderGroup.value);
 }
-
-watch(newChatModel, () => {
-  if (newChatUsesKeylessProvider.value) syncNewChatApiMode();
-});
 
 function syncNewChatModelSelection() {
   const defaults = getDefaultModelForProfile(newChatProfile.value);
@@ -1277,84 +1249,75 @@ watch(
   },
 );
 
-let newChatCatalogPoll: ReturnType<typeof setInterval> | undefined;
-let refreshingNewChatCatalog = false;
-watch(showNewChatModal, (visible) => {
-  if (newChatCatalogPoll) clearInterval(newChatCatalogPoll);
-  newChatCatalogPoll = undefined;
-  if (!visible) return;
-  newChatCatalogPoll = setInterval(async () => {
-    const free = newChatModelGroups.value.find(group => group.provider === "opencode-free");
-    if (refreshingNewChatCatalog || !free || !["loading", "error"].includes(free.catalog_status || "")) return;
-    refreshingNewChatCatalog = true;
-    try {
-      await appStore.reloadModels({ preserveSelection: true });
-      if (!showNewChatModal.value) return;
-      const current = selectedNewChatProviderGroup.value;
-      if (current && !newChatModel.value) {
-        newChatModel.value = current.models[0] || "";
-        syncNewChatApiMode();
-      } else if (!newChatProvider.value) {
-        ensureNewChatProviderSelection();
-      }
-    } finally {
-      refreshingNewChatCatalog = false;
-    }
-  }, 3000);
-});
-onUnmounted(() => { if (newChatCatalogPoll) clearInterval(newChatCatalogPoll); });
+function isCurrentNewChatOptionsLoad(sequence: number) {
+  return showNewChatModal.value && sequence === newChatOptionsLoadSequence;
+}
 
-async function openNewChatModal() {
+async function refreshNewChatAgentAvailability(sequence: number) {
+  newChatAgentLoading.value = !newChatAgentAvailability.value;
+  try {
+    const availability = await fetchAgentAvailabilitySnapshot();
+    if (!isCurrentNewChatOptionsLoad(sequence)) return;
+    newChatAgentAvailability.value = availability;
+    if (!newChatAgentOptions.value.some(option => option.value === newChatAgent.value)) {
+      newChatAgent.value = newChatAgentOptions.value[0]?.value || "ekko-agent";
+    }
+  } catch {
+    if (isCurrentNewChatOptionsLoad(sequence) && !newChatAgentAvailability.value) {
+      message.error(t("codingAgents.loadFailed"));
+    }
+  } finally {
+    if (isCurrentNewChatOptionsLoad(sequence)) newChatAgentLoading.value = false;
+  }
+}
+
+async function loadNewChatProfiles(sequence: number) {
+  if (profilesStore.profiles.length > 0) return;
+  await profilesStore.fetchProfiles();
+  if (!isCurrentNewChatOptionsLoad(sequence)) return;
+  if (!profilesStore.profiles.some(profile => profile.name === newChatProfile.value)) {
+    newChatProfile.value = profilesStore.activeProfileName || profilesStore.profiles[0]?.name || "default";
+  }
+  ensureNewChatProviderSelection();
+}
+
+async function loadNewChatModels(sequence: number) {
+  newChatModelsLoading.value = appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0;
+  if (!newChatModelsLoading.value) return;
+  try {
+    await appStore.loadModels();
+    if (isCurrentNewChatOptionsLoad(sequence)) ensureNewChatProviderSelection();
+  } finally {
+    if (isCurrentNewChatOptionsLoad(sequence)) newChatModelsLoading.value = false;
+  }
+}
+
+function openNewChatModal() {
+  const sequence = ++newChatOptionsLoadSequence;
   isBatchMode.value = false;
   selectedSessionKeys.value.clear();
   showBatchDeleteConfirm.value = false;
   newChatAgentPreset.value = undefined;
   newChatPresetReady.value = false;
+  if (isMobile.value) showSessions.value = false;
   showNewChatModal.value = true;
-  newChatLoading.value = true;
   newChatCategoryId.value = null;
   newChatProjectSlug.value = null;
   newChatExtraDirs.value = [];
   void loadWorkspaceProjects();
-  try {
-    await loadSessionCategories();
-    // Fetch agent install status so the agent dropdown only shows installed agents.
-    try {
-      const snapshot = await fetchAgentAvailabilitySnapshot();
-      newChatAgentAvailability.value = new Map(
-        snapshot.agents.map((agent) => [agent.id, { installed: agent.installed }]),
-      );
-    } catch {
-      newChatAgentAvailability.value = new Map();
-    }
-    // If the previously selected agent is not installed, fall back to the first available one.
-    if (!newChatAgentOptions.value.some((option) => option.value === newChatAgent.value)) {
-      newChatAgent.value = newChatAgentOptions.value[0]?.value ?? "hermes";
-    }
-    if (profilesStore.profiles.length === 0) await profilesStore.fetchProfiles();
-    if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
-      await appStore.loadModels();
-    }
-    newChatProfile.value =
-      profilesStore.activeProfileName ||
-      profilesStore.profiles.find((profile) => profile.active)?.name ||
-      profilesStore.profiles[0]?.name ||
-      "default";
-    
-    // Initialize workspace composable and load defaults
-    initWorkspaceComposable(newChatProfile.value);
-    
-    // Auto-fill most recent default workspace if available
-    if (mostRecentDefaultWorkspace.value) {
-      newChatWorkspace.value = mostRecentDefaultWorkspace.value;
-    } else {
-      newChatWorkspace.value = "";
-    }
-    
-    syncNewChatModelSelection();
-  } finally {
-    newChatLoading.value = false;
-  }
+  newChatProfile.value =
+    profilesStore.activeProfileName ||
+    profilesStore.profiles.find((profile) => profile.active)?.name ||
+    profilesStore.profiles[0]?.name ||
+    "default";
+  initWorkspaceComposable(newChatProfile.value);
+  newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
+  syncNewChatModelSelection();
+
+  void refreshNewChatAgentAvailability(sequence);
+  void loadSessionCategories();
+  void loadNewChatProfiles(sequence);
+  void loadNewChatModels(sequence);
 }
 
 function handleNewChatProfileChange(value: string) {
@@ -1396,11 +1359,11 @@ async function confirmNewChat() {
     newChatLoading.value = true;
     try {
       const agentId = newChatAgent.value as CodingAgentId;
-      const status = await fetchCodingAgentsStatus();
-      const tool = status.tools.find((item) => item.id === agentId);
-      if (!tool?.installed) {
-        const fallbackName = newChatAgentOptions.value.find(option => option.value === agentId)?.label || agentId;
-        message.warning(t("codingAgents.installRequired", { agent: tool?.name || fallbackName }));
+      // Reuse the server inventory; probing every CLI's version delays creation.
+      const status = await fetchAgentAvailabilitySnapshot();
+      if (agentInstallationState(status, agentId) !== "installed") {
+        const agentName = newChatAgentOptions.value.find(option => option.value === agentId)?.label || agentId;
+        message.warning(t("codingAgents.installRequired", { agent: agentName }));
         showNewChatModal.value = false;
         await router.push({ name: "hermes.agentManager" });
         return;
@@ -1414,7 +1377,7 @@ async function confirmNewChat() {
   }
 
   const group = selectedNewChatProviderGroup.value;
-  const source = newChatAgent.value === "hermes" ? "cli" : "coding_agent";
+  const source = newChatAgent.value === "hermes" ? "cli" : newChatAgent.value === "ekko-agent" ? "builtin_agent" : "coding_agent";
   const codingAgentMode = effectiveNewChatAgentMode.value;
   const isGlobalCodingAgent = source === "coding_agent" && codingAgentMode === "global";
   const agent = newChatAgent.value === "codex"
@@ -1427,7 +1390,8 @@ async function confirmNewChat() {
         ? "grok"
       : newChatAgent.value === "dsh" ? "dsh" : newChatAgent.value === "opencode"
         ? "opencode"
-      : newChatAgent.value === "cursor"
+      : isNativeCodingAgent(newChatAgent.value) ? newChatAgent.value
+      : newChatAgent.value === "antigravity" ? "antigravity" : newChatAgent.value === "cursor"
         ? "cursor"
       : newChatAgent.value === "ekko-agent"
         ? "ekko-agent"
@@ -1439,13 +1403,13 @@ async function confirmNewChat() {
     source,
     agent,
     codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
-    codingAgentMode: source === "coding_agent" ? codingAgentMode : undefined,
+    codingAgentMode: source === "coding_agent" || source === "builtin_agent" ? codingAgentMode : undefined,
     agentPreset: newChatAgent.value === "dsh" ? newChatAgentPreset.value : undefined,
     workspace: newChatWorkspace.value || null,
     workspaceExtraDirs: newChatExtraDirs.value.length ? [...newChatExtraDirs.value] : undefined,
     categoryId: newChatCategoryId.value,
-    baseUrl: source === "coding_agent" && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
-    apiKey: source === "coding_agent" && !isGlobalCodingAgent && !newChatUsesKeylessProvider.value ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
+    baseUrl: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
+    apiKey: (source === "coding_agent" || source === "builtin_agent") && !isGlobalCodingAgent ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
     apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
   });
   // Record workspace to recent list
@@ -1459,7 +1423,7 @@ async function confirmNewChat() {
     params: { sessionId: session.id },
   });
   showNewChatModal.value = false;
-  if (mobileQuery?.matches) showSessions.value = false;
+  if (isMobile.value) showSessions.value = false;
 }
 
 function sessionProfile(sessionId: string): string | null {
@@ -1862,6 +1826,7 @@ async function handleDeleteCategoryConfirm() {
 
 const canSetContextSessionModel = computed(() =>
   contextSession.value?.source === "cli" ||
+  contextSession.value?.source === "builtin_agent" ||
   (contextSession.value?.source === "coding_agent" && contextSession.value?.codingAgentMode !== "global"),
 );
 
@@ -2256,7 +2221,7 @@ const sessionModelSession = computed(() =>
 );
 
 const isSessionModelScopedCodingAgent = computed(() =>
-  sessionModelSession.value?.source === "coding_agent" &&
+  (sessionModelSession.value?.source === "coding_agent" || sessionModelSession.value?.source === "builtin_agent") &&
   sessionModelSession.value?.codingAgentMode !== "global",
 );
 const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
@@ -2271,7 +2236,8 @@ const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>(() =>
         ? "grok"
       : sessionModelSession.value?.agent === "dsh" ? "dsh" : sessionModelSession.value?.agent === "opencode"
         ? "opencode"
-      : sessionModelSession.value?.agent === "cursor"
+      : isNativeCodingAgent(sessionModelSession.value?.agent) ? sessionModelSession.value?.agent
+      : sessionModelSession.value?.agent === "antigravity" ? "antigravity" : sessionModelSession.value?.agent === "cursor"
         ? "cursor"
       : sessionModelSession.value?.agent === "ekko-agent"
         ? "ekko-agent"
@@ -2486,67 +2452,45 @@ async function handleSessionModelCustomSubmit() {
 
 <template>
   <div class="chat-panel" :class="{ 'chat-panel--standalone': standalone }">
-    <div
-      v-if="currentMode === 'chat' && !standalone"
-      class="session-backdrop"
-      :class="{ active: showSessions }"
-      @click="showSessions = false"
-    />
+    <PageSidebar>
     <aside
-      v-if="currentMode === 'chat' && !standalone"
+      v-if="hasPageSidebar"
       class="session-list"
-      :class="{ collapsed: !showSessions }"
+      :class="{ collapsed: !showSessions, 'session-list--navigation': contentMode !== 'chat' }"
     >
       <div v-if="showSessions" class="page-sidebar-top">
         <PageSidebarNav
           :active="contentMode === 'connections' ? 'connections' : contentMode === 'agents' ? 'agents' : contentMode === 'models' ? 'models' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
           @primary="openNewChatModal"
-        />
-        <div class="session-list-toolbar">
-          <NSelect
-            class="session-profile-filter"
-            :value="sessionProfileFilter || '__all__'"
-            :options="profileFilterOptions"
-            size="small"
-            :loading="profilesStore.loading"
-            @update:value="handleProfileFilterChange"
-          />
-          <div class="session-list-actions">
-            <button class="session-close-btn" @click="showSessions = false">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
+        >
+          <template #actions>
+            <ListActionsMenu
+              v-if="contentMode === 'chat'"
+              :label="t('chat.sessionListActions')"
+              :profiles="profilesStore.profiles"
+              :profile="sessionProfileFilter"
+              :loading="profilesStore.loading"
+              :batch-mode="isBatchMode"
+              @filter="handleProfileFilterChange"
+              @batch="toggleBatchMode"
+            />
+            <button
+              v-if="isMobile"
+              class="session-close-btn"
+              type="button"
+              :aria-label="t('common.close')"
+              @click="showSessions = false"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="m18 6-12 12M6 6l12 12" />
               </svg>
             </button>
-            <NButton
-              v-if="!isBatchMode"
-              quaternary
-              size="tiny"
-              @click="toggleBatchMode"
-              :title="t('chat.toggleBatchMode')"
-            >
-              <template #icon>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path d="M9 11l3 3L22 4" />
-                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-                </svg>
-              </template>
-            </NButton>
+          </template>
+        </PageSidebarNav>
+        <div v-if="contentMode === 'chat' && isBatchMode" class="session-list-toolbar">
+          <span class="session-selection-count" role="status">{{ t('chat.selectedSessions', { count: selectedCount }) }}</span>
+          <div class="session-list-actions">
             <NButton
               v-if="isBatchMode"
               quaternary
@@ -2554,6 +2498,7 @@ async function handleSessionModelCustomSubmit() {
               @click="selectAllSessions"
               :disabled="!canSelectAll || isBatchDeleting"
               :title="t('chat.selectAll')"
+              :aria-label="t('chat.selectAll')"
             >
               <template #icon>
                 <svg
@@ -2577,7 +2522,7 @@ async function handleSessionModelCustomSubmit() {
               @positive-click="handleBatchDeleteConfirm"
             >
               <template #trigger>
-                <NButton quaternary size="tiny" type="error" :loading="isBatchDeleting" :disabled="isBatchDeleting">
+                <NButton quaternary size="tiny" :title="t('common.delete')" :aria-label="t('common.delete')" :loading="isBatchDeleting" :disabled="isBatchDeleting">
                   <template #icon>
                     <svg
                       width="14"
@@ -2601,30 +2546,24 @@ async function handleSessionModelCustomSubmit() {
               size="tiny"
               @click="toggleBatchMode"
               :disabled="isBatchDeleting"
+              :title="t('common.cancel')"
+              :aria-label="t('common.cancel')"
             >
               <template #icon>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="m18 6-12 12M6 6l12 12" />
                 </svg>
               </template>
             </NButton>
           </div>
         </div>
       </div>
-      <div v-if="showSessions" class="session-items">
+      <div v-if="contentMode === 'chat' && showSessions" class="session-items">
         <div
           v-if="chatStore.isLoadingSessions && chatStore.sessions.length === 0"
           class="session-loading"
         >
-          {{ t("common.loading") }}
+          <NSpin size="small" :description="t('common.loading')" />
         </div>
         <div v-else-if="chatStore.sessions.length === 0" class="session-empty">
           {{ t("chat.noSessions") }}
@@ -2801,6 +2740,7 @@ async function handleSessionModelCustomSubmit() {
       </div>
       <PageSidebarFooter v-if="showSessions" />
     </aside>
+    </PageSidebar>
 
     <NDropdown
       :key="contextMenuCategoriesKey"
@@ -2903,7 +2843,6 @@ async function handleSessionModelCustomSubmit() {
         ref="renameInputRef"
         v-model:value="renameValue"
         :placeholder="t('chat.enterNewTitle')"
-        @keydown.enter="handleRenameConfirm"
       />
     </NModal>
 
@@ -2913,7 +2852,7 @@ async function handleSessionModelCustomSubmit() {
       :title="t('chat.setWorkspaceTitle')"
       :positive-text="t('common.ok')"
       :negative-text="t('common.cancel')"
-      style="width: 560px"
+      style="width: var(--studio-workspace-picker-width)"
       @positive-click="handleWorkspaceConfirm"
     >
       <div class="workspace-modal-body">
@@ -3143,7 +3082,7 @@ async function handleSessionModelCustomSubmit() {
       v-model:show="showNewChatModal"
       class="new-chat-drawer"
       placement="right"
-      width="min(440px, 100vw)"
+      width="var(--studio-drawer-width)"
       :mask-closable="true"
     >
       <NDrawerContent :title="t('chat.newChat')" closable>
@@ -3153,14 +3092,16 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               v-model:value="newChatAgent"
               :options="newChatAgentOptions"
-              :disabled="newChatLoading"
+                :virtual-scroll="false"
+              :loading="newChatAgentLoading"
+              :disabled="newChatLoading || newChatAgentLoading"
             />
           </label>
           <DshSessionPresetSelect
             v-if="showNewChatModal && newChatAgent === 'dsh'"
             v-model="newChatAgentPreset" :disabled="newChatLoading" @valid="newChatPresetReady = $event"
           />
-          <label v-if="isNewChatExternalCodingAgent && newChatAgent !== 'cursor'" class="new-chat-field">
+          <label v-if="isNewChatExternalCodingAgent && !isGlobalOnlyCodingAgent(newChatAgent)" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
               <NRadioButton
@@ -3177,7 +3118,7 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               :value="newChatProfile"
               :options="newChatProfileOptions"
-              :loading="newChatLoading || profilesStore.loading"
+              :loading="profilesStore.loading && profilesStore.profiles.length === 0"
               @update:value="handleNewChatProfileChange"
             />
           </label>
@@ -3189,7 +3130,7 @@ async function handleSessionModelCustomSubmit() {
               :options="newChatCategoryOptions"
               :placeholder="t('chat.categoryPlaceholder')"
               :loading="sessionCategoriesLoading || newChatCategoryCreating"
-              :disabled="newChatLoading || newChatCategoryCreating"
+              :disabled="newChatLoading || sessionCategoriesLoading || newChatCategoryCreating"
               filterable
               tag
               @update:value="handleNewChatCategoryChange"
@@ -3212,7 +3153,8 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               :value="newChatProvider"
               :options="newChatProviderOptions"
-              :disabled="newChatLoading"
+              :loading="newChatModelsLoading"
+              :disabled="newChatLoading || newChatModelsLoading"
               @update:value="handleNewChatProviderChange"
             />
           </label>
@@ -3223,7 +3165,8 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               v-model:value="newChatModel"
               :options="newChatModelOptions"
-              :disabled="newChatLoading || !newChatProvider"
+              :loading="newChatModelsLoading"
+              :disabled="newChatLoading || newChatModelsLoading || !newChatProvider"
               filterable
             />
           </label>
@@ -3232,7 +3175,7 @@ async function handleSessionModelCustomSubmit() {
             <NSelect
               v-model:value="newChatApiMode"
               :options="newChatApiModeOptions"
-              :disabled="newChatLoading || newChatUsesKeylessProvider"
+              :disabled="newChatLoading"
             />
           </label>
           <label v-if="newChatNeedsBaseUrl" class="new-chat-field">
@@ -3242,9 +3185,6 @@ async function handleSessionModelCustomSubmit() {
               :placeholder="t('models.baseUrlPlaceholder')"
             />
           </label>
-          <div v-if="newChatUsesProviderModel && newChatUsesKeylessProvider" class="new-chat-field">
-            {{ t("models.opencodeFreeHint") }}
-          </div>
           <label v-if="newChatNeedsApiKey" class="new-chat-field">
             <span class="new-chat-label">{{ t("models.apiKey") }}</span>
             <NInput
@@ -3389,70 +3329,46 @@ async function handleSessionModelCustomSubmit() {
 
     <div
       class="chat-main"
-      :class="{ 'chat-main--sidebar-collapsed': currentMode !== 'chat' || !showSessions }"
+      :class="{ 'chat-main--sidebar-collapsed': !pageSidebarExpanded }"
     >
       <ConnectionsPanel
         v-if="contentMode === 'connections'"
-        :sidebar-collapsed="!showSessions"
-        @toggle-sidebar="showSessions = !showSessions"
       />
       <AgentManagerPanel
         v-else-if="contentMode === 'agents'"
-        :sidebar-collapsed="!showSessions"
-        @toggle-sidebar="showSessions = !showSessions"
       />
       <ModelsPanel
         v-else-if="contentMode === 'models'"
-        :sidebar-collapsed="!showSessions"
-        @toggle-sidebar="showSessions = !showSessions"
       />
       <template v-else>
+      <PageHeader>
       <header v-if="!standalone" class="chat-header">
         <div class="header-left">
-          <NButton
+          <HeaderSidebarToggle
             v-if="currentMode === 'chat'"
             class="header-sidebar-toggle"
+            :expanded="showSessions"
+            @toggle="showSessions = !showSessions"
+          />
+          <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
+        </div>
+        <div class="header-actions">
+          <NButton
+            v-if="chatStore.activeSession?.workspace"
+            class="header-workspace-button"
             quaternary
             size="small"
-            @click="showSessions = !showSessions"
             circle
+            :title="chatStore.activeSession.workspace"
+            :aria-label="t('chat.setWorkspace')"
+            @click="openActiveSessionWorkspace"
           >
             <template #icon>
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
               </svg>
             </template>
           </NButton>
-          <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
-          <button
-            v-if="chatStore.activeSession?.workspace"
-            class="workspace-badge"
-            type="button"
-            :title="chatStore.activeSession.workspace"
-            @click="openActiveSessionWorkspace"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            </svg>
-            <span>
-              {{
-                chatStore.activeSession.workspace.split("/").pop() ||
-                chatStore.activeSession.workspace
-              }}
-            </span>
-          </button>
-        </div>
-        <div class="header-actions">
           <!-- chat/live mode toggle hidden -->
           <template v-if="currentMode === 'chat'">
             <NTooltip v-if="isSuperAdmin" trigger="hover">
@@ -3516,17 +3432,10 @@ async function handleSessionModelCustomSubmit() {
                     circle
                   >
                     <template #icon>
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.4"
-                        stroke-linecap="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M5 12h.01M12 12h.01M19 12h.01" />
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <circle cx="5" cy="12" r="1.6" />
+                        <circle cx="12" cy="12" r="1.6" />
+                        <circle cx="19" cy="12" r="1.6" />
                       </svg>
                     </template>
                   </NButton>
@@ -3537,6 +3446,7 @@ async function handleSessionModelCustomSubmit() {
           </template>
         </div>
       </header>
+      </PageHeader>
 
       <template v-if="currentMode === 'chat'">
         <div
@@ -3998,11 +3908,9 @@ async function handleSessionModelCustomSubmit() {
   width: $sidebar-width;
   min-height: 0;
   align-self: stretch;
-  margin: 10px;
+  margin: 0;
   background: $bg-sidebar-surface;
-  border: 1px solid $border-color;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  border-inline-end: 1px solid $border-color;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -4010,6 +3918,11 @@ async function handleSessionModelCustomSubmit() {
     width $transition-normal,
     opacity $transition-normal;
   overflow: hidden;
+
+  &--navigation .page-sidebar-top {
+    flex: 1;
+    overflow-y: auto;
+  }
 
   &.collapsed {
     width: 0;
@@ -4023,26 +3936,22 @@ async function handleSessionModelCustomSubmit() {
 
   @media (max-width: $breakpoint-mobile) {
     position: absolute;
-    left: 10px;
-    top: 10px;
-    bottom: 10px;
+    left: 0;
+    top: 0;
+    bottom: 0;
     height: auto;
     margin: 0;
     z-index: 120;
     width: $sidebar-width;
 
     &.collapsed {
-      transform: translateX(calc(-100% - 10px));
+      transform: translateX(-100%);
       opacity: 0;
     }
   }
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .session-close-btn {
-    display: flex;
-  }
-
   .session-backdrop {
     position: absolute;
     inset: 0;
@@ -4062,7 +3971,6 @@ async function handleSessionModelCustomSubmit() {
 .page-sidebar-top {
   flex-shrink: 0;
   padding: 12px;
-  border-bottom: 1px solid $border-color;
 }
 
 .page-sidebar-tabs {
@@ -4113,7 +4021,14 @@ async function handleSessionModelCustomSubmit() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
+  justify-content: space-between;
+}
+
+.session-selection-count {
+  min-width: 0;
+  font-size: 12px;
+  color: $text-secondary;
 }
 
 .session-list-actions {
@@ -4132,7 +4047,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .session-close-btn {
-  display: none;
+  display: inline-flex;
   border: none;
   background: none;
   cursor: pointer;
@@ -4156,11 +4071,6 @@ async function handleSessionModelCustomSubmit() {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   line-height: 22px;
-}
-
-.session-profile-filter {
-  min-width: 0;
-  flex: 1;
 }
 
 .conversation-switch {
@@ -4386,7 +4296,7 @@ async function handleSessionModelCustomSubmit() {
 .session-items {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 6px 12px;
+  padding: 0 6px 12px;
 }
 
 .session-loading,
@@ -4528,41 +4438,9 @@ async function handleSessionModelCustomSubmit() {
   }
 
   .header-session-title {
-    display: none;
+    font-size: 14px;
   }
 
-}
-
-.workspace-badge {
-  border: 0;
-  font-size: 11px;
-  line-height: 16px;
-  color: $text-muted;
-  background: rgba(255, 255, 255, 0.05);
-  padding: 2px 8px;
-  border-radius: 4px;
-  max-width: 160px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  cursor: pointer;
-
-  svg {
-    flex: 0 0 auto;
-  }
-
-  span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  &:hover {
-    color: $text-secondary;
-    background: rgba(var(--accent-primary-rgb), 0.06);
-  }
 }
 
 .header-tool-toggle.active {

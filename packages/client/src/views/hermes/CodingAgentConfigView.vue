@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import PageLoading from '@/components/common/PageLoading.vue'
+import PageHeader from '@/components/layout/PageHeader.vue'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NButton, NInput, NSpin, NTag, useMessage } from 'naive-ui'
+import { NButton, NInput, NTag, useMessage } from 'naive-ui'
 import {
   readCodingAgentConfigFile,
   writeCodingAgentConfigFile,
@@ -39,9 +41,16 @@ const settingsKeys: Record<CodingAgentId, Partial<Record<SettingsEditor, string>
   opencode: { preference: 'memory', configuration: 'settings' },
   dsh: { preference: 'memory', configuration: 'settings' },
   cursor: { configuration: 'settings' },
+  qwen: {},
+  kimi: {},
+  codebuddy: {},
+  qoder: {},
+  copilot: {},
+  zcode: {},
+  antigravity: { preference: 'memory', configuration: 'settings' },
 }
 
-const skillTargets: Record<CodingAgentId, SkillTarget> = {
+const skillTargets: Partial<Record<CodingAgentId, SkillTarget>> = {
   'claude-code': 'claude',
   codex: 'codex',
   pi: 'pi',
@@ -49,6 +58,7 @@ const skillTargets: Record<CodingAgentId, SkillTarget> = {
   opencode: 'opencode',
   dsh: 'dsh',
   cursor: 'cursor',
+  antigravity: 'antigravity',
 }
 
 const editorKinds: SettingsEditor[] = ['preference', 'configuration']
@@ -56,14 +66,14 @@ const editors = reactive<Record<SettingsEditor, SettingsEditorState>>({
   preference: { file: null, content: '', saving: false, error: '' },
   configuration: { file: null, content: '', saving: false, error: '' },
 })
-const loading = ref(false)
+const loading = ref(true)
 let loadVersion = 0
 
 const validAgentId = computed<CodingAgentId | null>(() =>
   agentId.value in settingsKeys ? agentId.value as CodingAgentId : null,
 )
 const skillTarget = computed<SkillTarget>(() =>
-  validAgentId.value ? skillTargets[validAgentId.value] : 'hermes',
+  validAgentId.value ? skillTargets[validAgentId.value] || 'hermes' : 'hermes',
 )
 const activeEditorKinds = computed(() => editorKinds.filter(kind =>
   validAgentId.value && settingsKeys[validAgentId.value][kind],
@@ -137,10 +147,12 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
 </script>
 
 <template>
-  <div class="coding-agent-config-view">
+  <PageLoading :show="loading" class="coding-agent-config-view">
+    <PageHeader>
     <header v-if="section === 'settings'" class="page-header">
       <h2 class="header-title">{{ t('sidebar.settings') }}</h2>
     </header>
+    </PageHeader>
 
     <DshPluginsPanel v-if="section === 'plugins' && validAgentId === 'dsh'" />
     <DshAgentPresetsPanel v-else-if="section === 'presets' && validAgentId === 'dsh'" />
@@ -153,7 +165,7 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
     </div>
 
     <div v-else-if="section === 'settings' && validAgentId" class="coding-agent-settings-content">
-      <NSpin v-if="loading" class="settings-loading" />
+      <template v-if="loading" class="settings-loading" />
       <div v-else class="settings-editors">
         <section
           v-for="editor in editorItems"
@@ -196,7 +208,7 @@ watch([agentId, section], loadSettingsFiles, { immediate: true })
         </section>
       </div>
     </div>
-  </div>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">

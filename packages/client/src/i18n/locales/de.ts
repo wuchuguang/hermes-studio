@@ -377,6 +377,7 @@ export default {
 
   // Common
   common: {
+    close: 'Schließen',
     loading: 'Laden...',
     cancel: 'Abbrechen',
     retry: 'Erneutern',
@@ -480,6 +481,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "API-Relay",
+    headline: "Führende KI-Modelle über ein Gateway",
+    description: "APIKEY.FAN ist das API-Gateway von Ekko Studios Partner. Es bietet einheitlichen Zugriff auf Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek und MiniMax und ist mit offiziellen APIs und SDKs kompatibel.",
+    zhipu: "Zhipu",
+    viewNow: "Jetzt ansehen",
+    apiCompatible: "Mit offiziellen APIs kompatibel",
+    usageTitle: "Schlüsselnutzung",
+    usageScope: "Umfasst zugängliche Profile. Derselbe Dienst und Schlüssel werden zusammengefasst; unterschiedliche Schlüssel werden separat angezeigt.",
+    loadFailed: "Nutzung konnte nicht geladen werden. Aktualisieren Sie zum erneuten Versuch.",
+    remaining: "Verbleibendes Kontingent",
+    sources: "Konfiguriert in",
+    keyActive: "Schlüssel aktiv",
+    keyInactive: "Schlüssel inaktiv",
+    requests: "Anfragen",
+    spend: "Kosten",
+    today: "Heute",
+    total: "Gesamt",
+    modelUsage: "Nutzung nach Modell",
+    model: "Modell",
+    errors: {
+      unauthorized: "Schlüsselauthentifizierung fehlgeschlagen. Prüfen Sie den konfigurierten Schlüssel.",
+      timeout: "Zeitüberschreitung bei der Nutzungsabfrage. Bitte aktualisieren.",
+      unavailable: "Nutzungsdienst nicht verfügbar. Bitte aktualisieren.",
+      invalid_response: "Der Dienst lieferte ein unbekanntes Antwortformat.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Update wird vorbereitet",
     desktopUpdateStopping: "Download wird gestoppt…",
@@ -581,6 +610,7 @@ export default {
     ekkoDescription: 'Ekko ist in Studio enthalten und muss nicht separat installiert, aktualisiert oder entfernt werden.',
     version: 'Version',
     codingAgentDescription: 'Studio kann diesen Agent installieren, auf Updates prüfen und entfernen.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Installieren Sie die Cursor-CLI (`agent`) von https://cursor.com/install und aktualisieren Sie danach. Studio installiert sie nicht per npm.',
     cursorNoManagedConfig: 'Der Start schreibt ~/.cursor/mcp.json nicht um. Verwaltete Server liegen in der Laufzeitkopie dieser Sitzung.',
     updateToVersion: 'Auf {version} aktualisieren',
@@ -979,6 +1009,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "Ausgabe-Tokens",
+    runUsageInput: "Eingabe-Tokens",
+    runUsageCacheRate: "Cache-Trefferquote",
+    runUsageCacheRateHint: "Aus dem Cache gelesene Tokens / alle Eingabe-Tokens dieses Laufs, einschließlich Cache-Lese- und Schreibzugriffen.",
+    runUsageCache: "Cache-Treffer",
+    runUsageCost: "Geschätzte Kosten",
+    runUsageSpeed: "Token-Tempo",
+    runUsageSpeedHint: "Ausgabe-Tokens / gesamte Modellanfragezeit, einschließlich Wartezeit auf das erste Token, ohne Werkzeuglaufzeit.",
+    runUsageAverageSpeed: "Mittleres Tempo",
+    runUsageAverageSpeedHint: "Ausgabetokens / gesamte Laufzeit, einschließlich Werkzeugen und Wartezeiten. Die CLI liefert keine Modellanfragedauer.",
+    runUsageEstimatedSpeed: "Geschätzt",
+    runUsageEstimatedSpeedHint: "Ausgabetokens / (Laufzeit − Werkzeugzeit). Überlappungen zählen einmal. Enthält Start- und Netzwerkaufwand; kein gemessenes Modelltempo.",
+
     contextRemaining: 'übrig',
     contextClickToEdit: 'Klicken zum Bearbeiten der Kontextlänge',
     contextEditTitle: 'Kontextlänge bearbeiten',
@@ -1147,6 +1190,9 @@ export default {
     interactionCountdown: '{time} verbleibend',
     interactionCountdownElapsed: '00:00 · Serverbestätigung ausstehend',
     deleteSession: 'Diese Sitzung loschen?',
+    sessionListActions: 'Aktionen für die Sitzungsliste',
+    filterByProfile: 'Nach Profil filtern',
+    selectedSessions: '{count} ausgewählt',
     toggleBatchMode: 'Batch-Auswahl',
     selectAll: 'Alle auswählen',
     confirmBatchDelete: '{count} ausgewählte Sitzungen löschen?',
@@ -1193,6 +1239,7 @@ export default {
     renameSession: 'Sitzung umbenennen',
     sessionNotFound: 'Sitzung nicht gefunden',
     enterNewTitle: 'Neuen Titel eingeben',
+    builtinAgent: 'Integrierter Agent',
     other: 'Sonstige',
     runFailed: 'Ausfuhrung fehlgeschlagen',
     error: 'Fehler',
@@ -1378,6 +1425,7 @@ jobTriggered: 'Job ausgelost',
 
   // Skills
   skills: {
+    filterBySource: "Nach Quelle filtern",
     title: 'Fahigkeiten',
     targetFilter: 'Runtime',
     targets: {
@@ -1591,10 +1639,6 @@ jobTriggered: 'Job ausgelost',
 
   // Models
   models: {
-    opencodeFreeHint: "Kein Konto oder API-Schlüssel erforderlich. Für kostenlose Modelle können Nutzungslimits gelten.",
-    opencodeFreeLoading: "Kostenlose Modelle werden im Hintergrund geladen…",
-    opencodeFreeRetry: "Anbieterprüfung oder Katalogaktualisierung fehlgeschlagen. Automatischer neuer Versuch; der Cache bleibt erhalten.",
-    opencodeFreeUpgrade: "Aktualisieren Sie Hermes Agent, um OpenCode Free zu nutzen.",
     title: 'Modelle',
     addProvider: 'Anbieter hinzufugen',
     noProviderPromptTitle: 'Kein Modellanbieter konfiguriert',
@@ -1924,6 +1968,10 @@ jobTriggered: 'Job ausgelost',
 
   // Logs
   logs: {
+    file: "Protokolldatei",
+    level: "Protokollstufe",
+    lines: "Zeilen",
+    filters: "Protokolle filtern",
     title: 'Protokolle',
     all: 'Alle',
     searchPlaceholder: 'Suchen...',
@@ -2807,6 +2855,26 @@ jobTriggered: 'Job ausgelost',
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Nicht erfasst",
+      partial: "Teilkosten; einige Nutzungen ohne Preis",
+      reported: "Vom Anbieter gemeldete Kosten",
+      estimated: "Geschätzte Kosten",
+      mixed: "Gemeldete und geschätzte Kosten",
+    },
+    pricing: {
+      title: "Modellpreise",
+      selectionHelp: "Wähle einen konfigurierten Anbieter und ein Modell oder gib eine ID ein und drücke Enter.",
+      catalogError: "Die konfigurierten Anbieter und Modelle konnten nicht geladen werden. IDs können weiterhin manuell eingegeben werden.",
+      help: "Ohne eigene Preise werden passende Modelle anhand von models.dev geschätzt. USD pro Million Tokens. Anbieter- und Modell-ID müssen genau passen (z. B. global). Schätzung nur ohne gemeldete Kosten. Leere Cachepreise bedeuten unbekannt. Änderungen gelten für künftige Aufrufe; frühere Kosten werden nicht neu berechnet.",
+      provider: "Anbieter-ID",
+      model: "Modell-ID",
+      input: "Eingabe",
+      output: "Ausgabe",
+      cacheRead: "Cache lesen",
+      cacheWrite: "Cache schreiben",
+      error: "Preise konnten nicht geladen oder gespeichert werden. IDs, Duplikate und nicht negative Preise prüfen.",
+    },
     title: 'Nutzungsstatistiken',
     refresh: 'Aktualisieren',
     totalTokens: 'Gesamt-Tokens',
@@ -2818,7 +2886,7 @@ jobTriggered: 'Job ausgelost',
     cacheHitRate: 'Cache-Trefferquote',
     modelBreakdown: 'Modellaufschluesselung',
     agentBreakdown: 'Agent-Aufschluesselung',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Unbekannt' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: 'Unbekannt' },
     dailyTrend: 'Tagliche Nutzung',
     date: 'Datum',
     tokens: 'Tokens',
@@ -2853,6 +2921,7 @@ jobTriggered: 'Job ausgelost',
   },
 
   workflow: {
+    listActions: 'Aktionen für die Workflow-Liste',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profil',
@@ -3262,6 +3331,30 @@ jobTriggered: 'Job ausgelost',
   },
 
   changelog: {
+    new_0_7_29_1: 'Dateidownloads über Dateibaum-Menüs und Diff-Werkzeugleisten in den Arbeitsbereichen von Chats und Gruppenchats wiederhergestellt (#3268)',
+    new_0_7_29_2: 'Falsche Anzeige von Antigravity als Ekko in Live-Aktivitätsbenachrichtigungen behoben (#3272)',
+    new_0_7_28_1: 'Antigravity CLI für Chats, Gruppenchats und Workflows im globalen und isolierten Modus ergänzt, mit nativen Einstellungen, MCP und Skill-Verwaltung (#3256)',
+    new_0_7_28_2: 'APIKEY.FAN-Relay-Seite mit Guthaben, Tages- und Gesamtnutzung sowie Aufschlüsselung nach Modell für konfigurierte API-Schlüssel ergänzt (#3257)',
+    new_0_7_28_3: 'Status manueller Update-Prüfungen und Erkennung aktualisierter CLI-Versionen für Coding Agents korrigiert und aktive Sitzungen geschützt (#3261)',
+    new_0_7_28_4: 'Vorzeitigen Abschluss, fehlenden Text und doppelte Claude-Antworten behoben; die vollständige finale Ausgabe wird gespeichert (#3260, #3263)',
+    new_0_7_28_5: 'Zugriff auf native Anmeldedaten für Antigravity im globalen Modus unter macOS wiederhergestellt und den Anmeldehinweis korrigiert (#3266)',
+    new_0_7_28_6: 'Navigation zu Geräteverbindungen mit einem Monitor-und-Smartphone-Symbol zur klareren Kennzeichnung aktualisiert (#3262)',
+    new_0_7_27_1: 'Dauerhaft gespeicherte Nutzungskarten pro Gesprächsrunde mit Tokens, Cache-Treffern, Kosten und Ausgabegeschwindigkeit ergänzt (#3241)',
+    new_0_7_27_2: 'Zuordnung der Coding-Agent-Nutzung, Kosten pro Aufruf und Gesamtsummen korrigiert; Nutzung unterbrochener Läufe bleibt erhalten und verspätete Daten werden nachgetragen (#3246)',
+    new_0_7_27_3: 'Nutzungskarten pro Runde in den Antwortblasen von Gruppenchats ergänzt und beim Laden des Verlaufs wiederhergestellt (#3248)',
+    new_0_7_27_4: 'Auswahl konfigurierter Anbieter und Modelle für benutzerdefinierte Preise ergänzt, mit manueller ID-Eingabe und klareren Ladefehlern (#3253)',
+    new_0_7_27_5: 'Wiederherstellung nach Überschreiten des Codex-Kontextlimits korrigiert: Die nächste Nachricht nutzt einen neuen Kontext, während Studio-Verlauf und Arbeitsbereich erhalten bleiben (#3204)',
+    new_0_7_27_6: 'Kompatibilität der Grok-Nachrichtenrollen mit DeepSeek Chat Completions korrigiert (#3244)',
+    new_0_7_27_7: 'Leeren Gesprächsverlauf nach einem Profile-Wechsel innerhalb derselben Verbindung korrigiert (#3242)',
+    new_0_7_27_8: 'Studio-Seitenpanelgrößen und Arbeitsbereichsauswahl vereinheitlicht, Überlagerung und Laden der Gruppen-Agent-Einstellungen korrigiert sowie versehentliches Umbenennen mit Enter verhindert (#3247)',
+    new_0_7_26_1: 'Studio-Navigation, Seitenkopfzeilen und Listenaktionen vereinheitlicht sowie mobile Layouts verbessert (#3232)',
+    new_0_7_26_2: 'Ladeanzeigen der Seiten vereinheitlicht und die Sichtbarkeit des Ladelogos auch bei reduzierten Animationen verbessert (#3232, #3236)',
+    new_0_7_26_3: 'Benutzerdefinierte Hintergründe und Glasebenen verbessert, Fensterränder und abgerundete Ecken korrigiert sowie Mikrofontasten an die Theme-Farben angepasst (#3236)',
+    new_0_7_26_4: 'Position und Stil der Fenstersteuerung je nach Plattform angepasst und native abgerundete Windows-Fensterecken beibehalten (#3234, #3235)',
+    new_0_7_26_5: 'Gateway-Autostart erfordert jetzt eine ausdrückliche Aktivierung; Profillisten laden ohne CLI-Prüfungen, und die erste Darstellung von Nachrichtenblasen wurde korrigiert (#3233)',
+    new_0_7_26_6: 'Kostenerfassung und benutzerdefinierte Modellpreise ergänzt, mit Schätzungen aus dem lokalen Modellkatalog und verbessertem Abgleich der Kontextlimits (#3226)',
+    new_0_7_26_7: 'Kompatibilität mit DSH-Registry-Voreinstellungen und nativer Plugin-Konfiguration ergänzt; Plugin-Seiten nutzen nun den verfügbaren Platz vollständig (#3218)',
+    new_0_7_26_8: 'Sichtbarkeit des Cursor-Logos auf hellen Karten im Agent Manager korrigiert (#3222)',
     new_0_7_25_1: 'Cursor CLI für Chats, Gruppenchats und Workflows ergänzt, mit nativen Einstellungen, Skill-Verwaltung und isolierter Studio-MCP-Konfiguration (#3110)',
     new_0_7_25_2: 'Konfigurierbare JEV-Funktionen für Erinnerungsabruf, Relevanzfilterung, Schreibprüfung, Skill-Zuordnung und Lernvorprüfung hinzugefügt (#3159, #3161, #3169)',
     new_0_7_25_3: 'Optionale JEV-Prüfungen für Browserziele und Aktionen, Gruppenzusammenfassungen, Nachrichtenweiterleitung und Workflow-Qualität hinzugefügt (#3208, #3211)',

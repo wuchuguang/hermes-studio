@@ -49,7 +49,7 @@ test('detects an external Cursor install on return without duplicate probes', as
   await expect(card.locator('.agent-version')).toHaveText('v2026.09.26-dd393fe')
   await expect(card).not.toContainText('Not installed')
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  expect(probes).toBe(2)
+  await expect.poll(() => probes).toBe(3)
 })
 
 test('retries after a failed probe and removes listeners when leaving management', async ({ page }) => {
@@ -85,9 +85,12 @@ test('detects an installation made before opening management even if focus arriv
     return route.fulfill({ json: { tools: [cursor(true)] } })
   })
   await page.goto('/#/studio/agents')
-  await expect(page.getByTestId('agent-card-cursor')).toBeVisible()
+  // Cards stay mounted under the initial loader while the snapshot is pending.
+  await expect(page.getByTestId('agent-card-cursor')).toHaveCount(1)
+  await expect(page.locator('.app-main .page-loading-overlay')).toBeVisible()
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   releaseSnapshot()
   await expect(page.getByTestId('agent-card-cursor').locator('.agent-version')).toHaveText('v2026.09.26-dd393fe')
+  await expect(page.getByTestId('agent-card-cursor')).toBeVisible()
   expect(probes).toBe(1)
 })

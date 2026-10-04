@@ -377,6 +377,7 @@ export default {
 
   // Common
   common: {
+    close: 'Fermer',
     loading: 'Chargement...',
     cancel: 'Annuler',
     retry: 'Réessayer',
@@ -480,6 +481,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "Relais API",
+    headline: "Les principaux modèles IA, une seule passerelle",
+    description: "APIKEY.FAN est la passerelle API partenaire d’Ekko Studio. Elle offre un accès unifié à Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek et MiniMax, et est compatible avec les API et SDK officiels.",
+    zhipu: "Zhipu",
+    viewNow: "Voir maintenant",
+    apiCompatible: "Compatible avec les API officielles",
+    usageTitle: "Utilisation par clé",
+    usageScope: "Inclut les profils accessibles. Un même service et une même clé partagent une carte ; les clés différentes sont affichées séparément.",
+    loadFailed: "Impossible de charger l’utilisation. Actualisez pour réessayer.",
+    remaining: "Quota restant",
+    sources: "Configurée dans",
+    keyActive: "Clé active",
+    keyInactive: "Clé inactive",
+    requests: "Requêtes",
+    spend: "Coût",
+    today: "Aujourd’hui",
+    total: "Total",
+    modelUsage: "Utilisation par modèle",
+    model: "Modèle",
+    errors: {
+      unauthorized: "Échec de l’authentification. Vérifiez la clé configurée.",
+      timeout: "La requête a expiré. Actualisez pour réessayer.",
+      unavailable: "Le service est indisponible. Actualisez pour réessayer.",
+      invalid_response: "Le format de la réponse du service n’est pas reconnu.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Préparation de la mise à jour",
     desktopUpdateStopping: "Arrêt du téléchargement…",
@@ -581,6 +610,7 @@ export default {
     ekkoDescription: 'Ekko est fourni avec Studio et ne nécessite aucune installation, mise à jour ou suppression distincte.',
     version: 'Version',
     codingAgentDescription: 'Studio peut installer, rechercher les mises à jour et supprimer cet agent.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Installez le CLI Cursor (`agent`) depuis https://cursor.com/install, puis actualisez. Studio ne l\'installe pas via npm.',
     cursorNoManagedConfig: 'Le démarrage ne réécrit pas ~/.cursor/mcp.json. Les serveurs gérés sont dans la copie d\'exécution de cette session.',
     updateToVersion: 'Mettre à jour vers {version}',
@@ -979,6 +1009,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "Tokens de sortie",
+    runUsageInput: "Tokens d’entrée",
+    runUsageCacheRate: "Taux de cache",
+    runUsageCacheRateHint: "Tokens lus en cache / tous les tokens d’entrée de cette exécution, lectures et écritures en cache incluses.",
+    runUsageCache: "Cache",
+    runUsageCost: "Coût estimé",
+    runUsageSpeed: "Vitesse",
+    runUsageSpeedHint: "Tokens de sortie / durée totale des requêtes au modèle, attente initiale incluse, outils exclus.",
+    runUsageAverageSpeed: "Vitesse moyenne",
+    runUsageAverageSpeedHint: "Tokens de sortie / durée totale, outils et attente inclus. La CLI ne fournit pas la durée des requêtes au modèle.",
+    runUsageEstimatedSpeed: "Vitesse estimée",
+    runUsageEstimatedSpeedHint: "Tokens de sortie / (durée totale − outils). Les chevauchements comptent une fois. Inclut démarrage et réseau ; vitesse du modèle non mesurée.",
+
     contextRemaining: 'restant',
     contextClickToEdit: 'Cliquez pour modifier la longueur du contexte',
     contextEditTitle: 'Modifier la longueur du contexte',
@@ -1147,6 +1190,9 @@ export default {
     interactionCountdown: '{time} restante',
     interactionCountdownElapsed: '00:00 · Confirmation du serveur en attente',
     deleteSession: 'Supprimer cette session ?',
+    sessionListActions: 'Actions de la liste des sessions',
+    filterByProfile: 'Filtrer par profil',
+    selectedSessions: '{count} sélectionnées',
     toggleBatchMode: 'Sélection par lot',
     selectAll: 'Tout sélectionner',
     confirmBatchDelete: 'Supprimer {count} sessions sélectionnées?',
@@ -1193,6 +1239,7 @@ export default {
     renameSession: 'Renommer la session',
     sessionNotFound: 'Session non trouvee',
     enterNewTitle: 'Entrez un nouveau titre',
+    builtinAgent: 'Agent intégré',
     other: 'Autre',
     runFailed: 'Echec de l\'execution',
     error: 'Erreur',
@@ -1378,6 +1425,7 @@ jobTriggered: 'Job declenche',
 
   // Skills
   skills: {
+    filterBySource: "Filtrer par source",
     title: 'Competences',
     targetFilter: 'Runtime',
     targets: {
@@ -1591,10 +1639,6 @@ jobTriggered: 'Job declenche',
 
   // Models
   models: {
-    opencodeFreeHint: "Aucun compte ni clé API requis. Les modèles gratuits peuvent être limités.",
-    opencodeFreeLoading: "Chargement des modèles gratuits en arrière-plan…",
-    opencodeFreeRetry: "Échec de la vérification ou de la mise à jour du catalogue. Nouvelle tentative automatique ; le cache est conservé.",
-    opencodeFreeUpgrade: "Mettez Hermes Agent à jour pour utiliser OpenCode Free.",
     title: 'Modeles',
     addProvider: 'Ajouter un fournisseur',
     noProviderPromptTitle: 'Aucun fournisseur de modeles configure',
@@ -1924,6 +1968,10 @@ jobTriggered: 'Job declenche',
 
   // Logs
   logs: {
+    file: "Fichier journal",
+    level: "Niveau de journalisation",
+    lines: "Lignes",
+    filters: "Filtrer les journaux",
     title: 'Journaux',
     all: 'Tout',
     searchPlaceholder: 'Rechercher...',
@@ -2807,6 +2855,26 @@ jobTriggered: 'Job declenche',
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Non enregistré",
+      partial: "Coût partiel ; certaines utilisations sans tarif",
+      reported: "Coût indiqué par le fournisseur",
+      estimated: "Coût estimé",
+      mixed: "Coûts indiqués et estimés",
+    },
+    pricing: {
+      title: "Tarifs des modèles",
+      selectionHelp: "Sélectionnez un fournisseur et un modèle configurés, ou saisissez un ID et appuyez sur Entrée.",
+      catalogError: "Impossible de charger les fournisseurs et modèles configurés. Vous pouvez toujours saisir les ID manuellement.",
+      help: "Sans tarif personnalisé, le coût est estimé avec les tarifs du modèle correspondant sur models.dev. USD par million de tokens. Identifiants fournisseur et modèle exacts (par ex. global). Estimation uniquement si aucun coût reçu. Cache sans tarif : coût inconnu. Modifications pour les prochains appels, sans recalcul du passé.",
+      provider: "ID fournisseur",
+      model: "ID modèle",
+      input: "Entrée",
+      output: "Sortie",
+      cacheRead: "Lecture du cache",
+      cacheWrite: "Écriture du cache",
+      error: "Échec du chargement ou de la sauvegarde. Vérifiez les ID, les doublons et les tarifs non négatifs.",
+    },
     title: 'Statistiques d\'utilisation',
     refresh: 'Actualiser',
     totalTokens: 'Total des jetons',
@@ -2818,7 +2886,7 @@ jobTriggered: 'Job declenche',
     cacheHitRate: 'Taux de succes du cache',
     modelBreakdown: 'Repartition par modele',
     agentBreakdown: 'Repartition par agent',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Inconnu' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: 'Inconnu' },
     dailyTrend: 'Utilisation quotidienne',
     date: 'Date',
     tokens: 'Jetons',
@@ -2853,6 +2921,7 @@ jobTriggered: 'Job declenche',
   },
 
   workflow: {
+    listActions: 'Actions de la liste des workflows',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Profil',
@@ -3262,6 +3331,30 @@ jobTriggered: 'Job declenche',
   },
 
   changelog: {
+    new_0_7_29_1: 'Rétablissement du téléchargement de fichiers depuis les menus de l’arborescence et les barres d’outils des différences dans les espaces de travail des chats et des chats de groupe (#3268)',
+    new_0_7_29_2: 'Correction de l’affichage erroné d’Antigravity sous le nom Ekko dans les notifications d’activité en direct (#3272)',
+    new_0_7_28_1: 'Ajout du CLI Antigravity pour les chats, discussions de groupe et workflows en modes global et isolé, avec paramètres natifs, MCP et gestion des compétences (#3256)',
+    new_0_7_28_2: 'Ajout d’une page de relais APIKEY.FAN avec solde, usage quotidien et total, et détail par modèle pour les clés API configurées (#3257)',
+    new_0_7_28_3: 'Correction de l’état des vérifications manuelles de mise à jour et de la détection des versions CLI mises à jour pour les Coding Agents, avec protection des sessions actives (#3261)',
+    new_0_7_28_4: 'Correction des réponses Claude terminées trop tôt, incomplètes ou dupliquées, avec conservation de la sortie finale complète (#3260, #3263)',
+    new_0_7_28_5: 'Correction de l’accès aux identifiants natifs du mode global Antigravity sous macOS et de l’indication de connexion (#3266)',
+    new_0_7_28_6: 'Navigation des connexions d’appareils mise à jour avec une icône de moniteur et de téléphone pour mieux identifier cette entrée (#3262)',
+    new_0_7_27_1: 'Ajout de cartes persistantes par tour affichant les tokens, les accès au cache, les coûts et la vitesse de sortie (#3241)',
+    new_0_7_27_2: 'Correction de l’attribution de l’usage des Coding Agents, des coûts par appel et des totaux cumulés, avec conservation de l’usage des exécutions interrompues et mise à jour des données tardives (#3246)',
+    new_0_7_27_3: 'Ajout de cartes d’usage par tour dans les bulles de réponse des groupes, restaurées lors du chargement de l’historique (#3248)',
+    new_0_7_27_4: 'Sélection des fournisseurs et modèles configurés pour les tarifs personnalisés, avec saisie manuelle des ID et erreurs de chargement plus claires (#3253)',
+    new_0_7_27_5: 'Correction de la reprise après dépassement du contexte de Codex : le message suivant utilise un nouveau contexte tout en conservant l’historique Studio et l’espace de travail (#3204)',
+    new_0_7_27_6: 'Correction de la compatibilité des rôles des messages Grok avec DeepSeek Chat Completions (#3244)',
+    new_0_7_27_7: 'Correction de l’historique de conversation vide après un changement de Profile sur la même connexion (#3242)',
+    new_0_7_27_8: 'Uniformisation des dimensions des panneaux Studio et du sélecteur d’espace de travail, correction de la superposition et du chargement des réglages des Agents de groupe, et prévention des renommages accidentels avec Entrée (#3247)',
+    new_0_7_26_1: 'Navigation, en-têtes de page et actions des listes de Studio unifiés, avec une meilleure mise en page sur mobile (#3232)',
+    new_0_7_26_2: 'Indicateurs de chargement des pages unifiés et logo de chargement plus visible, y compris en mode de réduction des animations (#3232, #3236)',
+    new_0_7_26_3: 'Arrière-plans personnalisés et couches translucides améliorés, bords et coins arrondis corrigés, et boutons de microphone adaptés aux couleurs du thème (#3236)',
+    new_0_7_26_4: 'Position et style des commandes de fenêtre adaptés à chaque plateforme, en conservant les coins arrondis natifs de Windows (#3234, #3235)',
+    new_0_7_26_5: 'Démarrage automatique du Gateway désormais sur activation explicite, chargement des profils sans attendre les vérifications CLI et affichage initial des bulles de message corrigé (#3233)',
+    new_0_7_26_6: 'Ajout du suivi des coûts et de tarifs personnalisés par modèle, avec des estimations issues du catalogue local et une meilleure correspondance des limites de contexte (#3226)',
+    new_0_7_26_7: 'Compatibilité avec les préréglages du registre DSH et la configuration native des plugins, et correction des pages de plugins ne remplissant pas tout l’espace disponible (#3218)',
+    new_0_7_26_8: 'Visibilité du logo Cursor corrigée sur les cartes claires du gestionnaire d’agents (#3222)',
     new_0_7_25_1: 'Prise en charge de Cursor CLI dans les discussions, groupes et workflows, avec paramètres natifs, gestion des compétences et configuration Studio MCP isolée (#3110)',
     new_0_7_25_2: 'Ajout du rappel de mémoire JEV, du filtrage de pertinence, de la revue des écritures, de la sélection des compétences et des vérifications préalables à l’apprentissage, tous configurables (#3159, #3161, #3169)',
     new_0_7_25_3: 'Ajout de contrôles JEV facultatifs pour les cibles et actions du navigateur, la revue des résumés de groupe, le routage des messages et la qualité des workflows (#3208, #3211)',

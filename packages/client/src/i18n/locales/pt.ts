@@ -377,6 +377,7 @@ export default {
 
   // Common
   common: {
+    close: 'Fechar',
     loading: 'Carregando...',
     cancel: 'Cancelar',
     retry: 'Tentar novamente',
@@ -480,6 +481,34 @@ export default {
   },
 
   // Sidebar
+  apiRelay: {
+    title: "Relay de API",
+    headline: "Os principais modelos de IA em um só gateway",
+    description: "APIKEY.FAN é o gateway de API parceiro do Ekko Studio. Oferece acesso unificado a Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek e MiniMax e é compatível com as APIs e os SDKs oficiais.",
+    zhipu: "Zhipu",
+    viewNow: "Ver agora",
+    apiCompatible: "Compatível com as APIs oficiais",
+    usageTitle: "Uso por chave",
+    usageScope: "Inclui os perfis acessíveis. O mesmo serviço e chave compartilham um cartão; chaves diferentes são exibidas separadamente.",
+    loadFailed: "Não foi possível carregar o uso. Atualize para tentar novamente.",
+    remaining: "Cota restante",
+    sources: "Configurada em",
+    keyActive: "Chave ativa",
+    keyInactive: "Chave inativa",
+    requests: "Solicitações",
+    spend: "Custo",
+    today: "Hoje",
+    total: "Total",
+    modelUsage: "Uso por modelo",
+    model: "Modelo",
+    errors: {
+      unauthorized: "Falha na autenticação. Verifique a chave configurada.",
+      timeout: "A consulta de uso excedeu o tempo limite. Atualize para tentar novamente.",
+      unavailable: "O serviço de uso está indisponível. Atualize para tentar novamente.",
+      invalid_response: "O serviço retornou um formato de uso desconhecido.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "Preparando atualização",
     desktopUpdateStopping: "Parando download…",
@@ -581,6 +610,7 @@ export default {
     ekkoDescription: 'O Ekko acompanha o Studio e não precisa ser instalado, atualizado ou removido separadamente.',
     version: 'Versão',
     codingAgentDescription: 'O Studio pode instalar, verificar atualizações e remover este agente.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Instale o CLI do Cursor (`agent`) em https://cursor.com/install e atualize. O Studio não o instala via npm.',
     cursorNoManagedConfig: 'A inicialização não reescreve ~/.cursor/mcp.json. Os servidores gerenciados ficam na cópia de execução desta sessão.',
     updateToVersion: 'Atualizar para {version}',
@@ -979,6 +1009,19 @@ export default {
 
   // Chat
   chat: {
+    runUsageOutput: "Tokens de saída",
+    runUsageInput: "Tokens de entrada",
+    runUsageCacheRate: "Taxa de cache",
+    runUsageCacheRateHint: "Tokens lidos do cache / todos os tokens de entrada da execução, incluindo leituras e gravações em cache.",
+    runUsageCache: "Cache",
+    runUsageCost: "Custo estimado",
+    runUsageSpeed: "Velocidade",
+    runUsageSpeedHint: "Tokens de saída / tempo total das requisições ao modelo, incluindo a espera inicial e excluindo ferramentas.",
+    runUsageAverageSpeed: "Velocidade média",
+    runUsageAverageSpeedHint: "Tokens de saída / duração total, incluindo ferramentas e espera. A CLI não fornece o tempo das solicitações ao modelo.",
+    runUsageEstimatedSpeed: "Velocidade est.",
+    runUsageEstimatedSpeedHint: "Tokens de saída / (duração total − ferramentas). Sobreposições contam uma vez. Inclui inicialização e rede; não é a velocidade medida do modelo.",
+
     contextRemaining: 'restante',
     contextClickToEdit: 'Clique para editar o tamanho do contexto',
     contextEditTitle: 'Editar tamanho do contexto',
@@ -1147,6 +1190,9 @@ export default {
     interactionCountdown: '{time} restante',
     interactionCountdownElapsed: '00:00 · Aguardando confirmação do servidor',
     deleteSession: 'Excluir esta sessão?',
+    sessionListActions: 'Ações da lista de sessões',
+    filterByProfile: 'Filtrar por perfil',
+    selectedSessions: '{count} selecionadas',
     toggleBatchMode: 'Seleção em lote',
     selectAll: 'Selecionar tudo',
     confirmBatchDelete: 'Excluir {count} sessões selecionadas?',
@@ -1193,6 +1239,7 @@ export default {
     renameSession: 'Renomear sessão',
     sessionNotFound: 'Sessão não encontrada',
     enterNewTitle: 'Digite um novo título',
+    builtinAgent: 'Agent integrado',
     other: 'Outro',
     runFailed: 'Falha na execução',
     error: 'Erro',
@@ -1378,6 +1425,7 @@ jobTriggered: 'Job acionado',
 
   // Skills
   skills: {
+    filterBySource: "Filtrar por origem",
     title: 'Habilidades',
     targetFilter: 'Runtime',
     targets: {
@@ -1591,10 +1639,6 @@ jobTriggered: 'Job acionado',
 
   // Models
   models: {
-    opencodeFreeHint: "Não é necessária conta nem chave API. Os modelos gratuitos podem ter limites de uso.",
-    opencodeFreeLoading: "Carregando modelos gratuitos em segundo plano…",
-    opencodeFreeRetry: "Falha na verificação ou atualização do catálogo. Nova tentativa automática; o cache será mantido.",
-    opencodeFreeUpgrade: "Atualize o Hermes Agent para usar o OpenCode Free.",
     title: 'Modelos',
     addProvider: 'Adicionar provedor',
     noProviderPromptTitle: 'Nenhum provedor de modelos configurado',
@@ -1924,6 +1968,10 @@ jobTriggered: 'Job acionado',
 
   // Logs
   logs: {
+    file: "Arquivo de log",
+    level: "Nível de log",
+    lines: "Linhas",
+    filters: "Filtrar logs",
     title: 'Logs',
     all: 'Todos',
     searchPlaceholder: 'Buscar...',
@@ -2807,6 +2855,26 @@ jobTriggered: 'Job acionado',
 
   // Usage
   usage: {
+    costStates: {
+      unknown: "Não registrado",
+      partial: "Custo parcial; parte do uso sem preço",
+      reported: "Custo informado pelo provedor",
+      estimated: "Custo estimado",
+      mixed: "Inclui custos informados e estimados",
+    },
+    pricing: {
+      title: "Preços dos modelos",
+      selectionHelp: "Selecione um provedor e modelo configurados ou digite um ID e pressione Enter.",
+      catalogError: "Não foi possível carregar os provedores e modelos configurados. Você ainda pode inserir os IDs manualmente.",
+      help: "Sem preços personalizados, o custo é estimado com os preços do modelo correspondente no models.dev. USD por milhão de tokens. IDs de provedor e modelo devem corresponder exatamente (ex.: global). Estimativa apenas sem custo informado. Cache sem preço significa desconhecido. Alterações valem para futuras chamadas, sem recalcular o histórico.",
+      provider: "ID do provedor",
+      model: "ID do modelo",
+      input: "Entrada",
+      output: "Saída",
+      cacheRead: "Leitura de cache",
+      cacheWrite: "Gravação de cache",
+      error: "Não foi possível carregar ou salvar preços. Verifique IDs, duplicatas e preços não negativos.",
+    },
     title: 'Estatisticas de uso',
     refresh: 'Atualizar',
     totalTokens: 'Total de tokens',
@@ -2818,7 +2886,7 @@ jobTriggered: 'Job acionado',
     cacheHitRate: 'Taxa de acerto de cache',
     modelBreakdown: 'Detalhamento por modelo',
     agentBreakdown: 'Detalhamento por agente',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: 'Desconocido' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: 'Desconocido' },
     dailyTrend: 'Uso diario',
     date: 'Data',
     tokens: 'Tokens',
@@ -2853,6 +2921,7 @@ jobTriggered: 'Job acionado',
   },
 
   workflow: {
+    listActions: 'Ações da lista de fluxos de trabalho',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: 'Workflow',
     profile: 'Perfil',
@@ -3262,6 +3331,30 @@ jobTriggered: 'Job acionado',
   },
 
   changelog: {
+    new_0_7_29_1: 'Restaurado o download de arquivos pelos menus da árvore de arquivos e pelas barras de diferenças nos espaços de trabalho de chats e chats em grupo (#3268)',
+    new_0_7_29_2: 'Corrigida a identificação incorreta do Antigravity como Ekko nas notificações de atividade ao vivo (#3272)',
+    new_0_7_28_1: 'Adicionado Antigravity CLI para chats, chats em grupo e fluxos de trabalho nos modos global e isolado, com configurações nativas, MCP e gestão de habilidades (#3256)',
+    new_0_7_28_2: 'Adicionada uma página de relay APIKEY.FAN com saldo, uso diário e total e detalhamento por modelo para as chaves API configuradas (#3257)',
+    new_0_7_28_3: 'Corrigidos o estado das verificações manuais de atualização e a detecção de versões CLI atualizadas nos Coding Agents, com proteção das sessões ativas (#3261)',
+    new_0_7_28_4: 'Corrigidos o encerramento antecipado, o texto ausente e as respostas duplicadas do Claude, preservando a saída final completa (#3260, #3263)',
+    new_0_7_28_5: 'Corrigido o acesso às credenciais nativas no modo global do Antigravity no macOS e a orientação de login (#3266)',
+    new_0_7_28_6: 'Atualizada a navegação de conexões de dispositivos com um ícone de monitor e telefone para identificar melhor essa entrada (#3262)',
+    new_0_7_27_1: 'Adicionados cartões persistentes por turno com tokens, acertos de cache, custos e velocidade de saída (#3241)',
+    new_0_7_27_2: 'Corrigidas a atribuição do uso dos Coding Agents, os custos por chamada e os totais acumulados; o uso de execuções interrompidas é preservado e os dados tardios são atualizados (#3246)',
+    new_0_7_27_3: 'Adicionados cartões de uso por turno nas respostas do chat em grupo, restaurados ao carregar o histórico (#3248)',
+    new_0_7_27_4: 'Adicionada a seleção de provedores e modelos configurados para preços personalizados, com entrada manual de IDs e erros de carregamento mais claros (#3253)',
+    new_0_7_27_5: 'Corrigida a recuperação do Codex após exceder o contexto: a próxima mensagem usa um novo contexto e mantém o histórico do Studio e o espaço de trabalho (#3204)',
+    new_0_7_27_6: 'Corrigida a compatibilidade dos papéis das mensagens do Grok com DeepSeek Chat Completions (#3244)',
+    new_0_7_27_7: 'Corrigido o histórico de conversa vazio ao trocar de Profile na mesma conexão (#3242)',
+    new_0_7_27_8: 'Unificados os tamanhos dos painéis do Studio e o layout do seletor de espaço de trabalho, corrigidos a sobreposição e o carregamento das configurações de Agents de grupo, e evitadas renomeações acidentais com Enter (#3247)',
+    new_0_7_26_1: 'Navegação, cabeçalhos e ações das listas do Studio unificados, com melhorias na disposição em dispositivos móveis (#3232)',
+    new_0_7_26_2: 'Indicadores de carregamento das páginas unificados e logótipo de carregamento mais visível, incluindo no modo de movimento reduzido (#3232, #3236)',
+    new_0_7_26_3: 'Fundos personalizados e camadas translúcidas melhorados, margens e cantos arredondados corrigidos, e botões de microfone adaptados às cores do tema (#3236)',
+    new_0_7_26_4: 'Posição e estilo dos controlos de janela ajustados a cada plataforma, preservando os cantos arredondados nativos do Windows (#3234, #3235)',
+    new_0_7_26_5: 'O arranque automático do Gateway requer agora ativação explícita; os perfis carregam sem esperar pelas verificações da CLI e a apresentação inicial das bolhas de mensagens foi corrigida (#3233)',
+    new_0_7_26_6: 'Adicionados o registo de custos e preços personalizados por modelo, com estimativas do catálogo local e melhor correspondência dos limites de contexto (#3226)',
+    new_0_7_26_7: 'Adicionada compatibilidade com predefinições do registo DSH e configuração nativa de plugins; corrigidas as páginas de plugins que não preenchiam todo o espaço disponível (#3218)',
+    new_0_7_26_8: 'Corrigida a visibilidade do logótipo do Cursor nos cartões claros do gestor de agentes (#3222)',
     new_0_7_25_1: 'Adicionado suporte para Cursor CLI em conversas, grupos e fluxos de trabalho, com definições nativas, gestão de competências e configuração isolada do Studio MCP (#3110)',
     new_0_7_25_2: 'Adicionadas funções configuráveis de JEV para recuperação de memórias, filtragem de relevância, revisão de escritas, seleção de competências e verificação prévia da aprendizagem (#3159, #3161, #3169)',
     new_0_7_25_3: 'Adicionadas verificações JEV opcionais para alvos e ações do navegador, revisão de resumos de grupo, encaminhamento de mensagens e qualidade dos fluxos de trabalho (#3208, #3211)',

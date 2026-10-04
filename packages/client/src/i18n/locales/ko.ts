@@ -377,6 +377,7 @@ export default {
 
   // 공통
   common: {
+    close: '닫기',
     loading: '로딩 중...',
     cancel: '취소',
     retry: '재시도',
@@ -480,6 +481,34 @@ export default {
     toolsClearExcluded: '제외 항목 지우기',
   },
 
+  apiRelay: {
+    title: "API 릴레이",
+    headline: "주요 AI 모델을 하나의 게이트웨이로",
+    description: "APIKEY.FAN은 Ekko Studio의 제휴 API 게이트웨이입니다. Claude, ChatGPT, Grok, Gemini, Zhipu, Kimi, DeepSeek, MiniMax에 통합 API로 접근할 수 있으며, 공식 API 및 SDK와 호환됩니다.",
+    zhipu: "Zhipu",
+    viewNow: "지금 보기",
+    apiCompatible: "공식 API 호환",
+    usageTitle: "키 사용량",
+    usageScope: "접근 가능한 프로필을 포함합니다. 같은 서비스와 키는 한 카드로 합치고 다른 키는 별도로 표시합니다.",
+    loadFailed: "사용량을 불러오지 못했습니다. 새로고침하여 다시 시도하세요.",
+    remaining: "남은 할당량",
+    sources: "설정 출처",
+    keyActive: "유효한 키",
+    keyInactive: "비활성 키",
+    requests: "요청 수",
+    spend: "비용",
+    today: "오늘",
+    total: "누적",
+    modelUsage: "모델별 사용량",
+    model: "모델",
+    errors: {
+      unauthorized: "키 인증에 실패했습니다. 설정한 키를 확인하세요.",
+      timeout: "사용량 요청 시간이 초과되었습니다. 새로고침하여 다시 시도하세요.",
+      unavailable: "사용량 서비스에 연결할 수 없습니다. 새로고침하여 다시 시도하세요.",
+      invalid_response: "사용량 응답 형식을 인식할 수 없습니다.",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "업데이트 준비 중",
     desktopUpdateStopping: "다운로드 중지 중…",
@@ -581,6 +610,7 @@ export default {
     ekkoDescription: 'Ekko는 Studio에 포함되어 있어 별도로 설치, 업데이트 또는 삭제할 필요가 없습니다.',
     version: '버전',
     codingAgentDescription: 'Studio에서 설치, 업데이트 확인 및 삭제할 수 있습니다.',
+    antigravityDescription: 'Install Antigravity CLI (agy) using the official guide and sign in from a terminal, then refresh. Global and scoped modes; installation, updates and removal are managed outside Studio.',
     cursorDescription: 'Cursor CLI(`agent`)는 https://cursor.com/install 에서 설치한 뒤 새로고침하세요. Studio는 npm으로 설치하지 않습니다.',
     cursorNoManagedConfig: '시작 시 ~/.cursor/mcp.json은 덮어쓰지 않습니다. 관리 서버는 이번 세션의 런타임 복사본에 있습니다.',
     updateToVersion: '{version}(으)로 업데이트',
@@ -979,6 +1009,19 @@ export default {
 
   // 채팅
   chat: {
+    runUsageOutput: "출력 토큰",
+    runUsageInput: "입력 토큰",
+    runUsageCacheRate: "캐시 적중률",
+    runUsageCacheRateHint: "캐시 읽기 토큰 ÷ 이번 실행의 전체 입력 토큰 (캐시 읽기 및 쓰기 포함).",
+    runUsageCache: "캐시 적중",
+    runUsageCost: "예상 비용",
+    runUsageSpeed: "토큰 속도",
+    runUsageSpeedHint: "실행 출력 토큰 ÷ 모델 요청 총 시간. 첫 토큰 대기를 포함하고 도구 실행은 제외합니다.",
+    runUsageAverageSpeed: "평균 속도",
+    runUsageAverageSpeedHint: "실행 출력 토큰 / 도구 실행과 대기를 포함한 전체 시간. CLI가 모델 요청 시간을 제공하지 않았습니다.",
+    runUsageEstimatedSpeed: "추정 속도",
+    runUsageEstimatedSpeedHint: "출력 토큰 / (실행 시간 − 도구 시간). 병렬 도구의 겹치는 시간은 한 번만 제외합니다. 시작 및 네트워크 시간이 포함되어 모델 실측 속도는 아닙니다.",
+
     contextRemaining: '남음',
     contextClickToEdit: '클릭하여 컨텍스트 길이 편집',
     contextEditTitle: '컨텍스트 길이 편집',
@@ -1147,6 +1190,9 @@ export default {
     interactionCountdown: '{time} 남음',
     interactionCountdownElapsed: '00:00 · 서버 확인 대기 중',
     deleteSession: '이 세션을 삭제하시겠습니까?',
+    sessionListActions: '세션 목록 작업',
+    filterByProfile: '프로필로 필터링',
+    selectedSessions: '{count}개 선택됨',
     toggleBatchMode: '일괄 선택',
     selectAll: '모두 선택',
     confirmBatchDelete: '선택한 {count}개의 세션을 삭제하시겠습니까?',
@@ -1193,6 +1239,7 @@ export default {
     renameSession: '세션 이름 변경',
     sessionNotFound: '세션을 찾을 수 없습니다',
     enterNewTitle: '새 제목을 입력하세요',
+    builtinAgent: '내장 Agent',
     other: '기타',
     runFailed: '실행 실패',
     error: '오류',
@@ -1378,6 +1425,7 @@ export default {
 
   // 스킬
   skills: {
+    filterBySource: "출처별 필터",
     title: '스킬',
     targetFilter: '런타임',
     targets: {
@@ -1591,10 +1639,6 @@ export default {
 
   // 모델
   models: {
-    opencodeFreeHint: "계정이나 API 키가 필요하지 않습니다. 무료 모델은 사용량이 제한될 수 있습니다.",
-    opencodeFreeLoading: "백그라운드에서 무료 모델을 불러오는 중…",
-    opencodeFreeRetry: "제공자 확인 또는 목록 갱신에 실패했습니다. 캐시를 유지하고 자동으로 다시 시도합니다.",
-    opencodeFreeUpgrade: "OpenCode Free를 사용하려면 Hermes Agent를 업데이트하세요.",
     title: '모델',
     addProvider: 'Provider 추가',
     noProviderPromptTitle: '모델 Provider가 설정되지 않음',
@@ -1924,6 +1968,10 @@ export default {
 
   // 로그
   logs: {
+    file: "로그 파일",
+    level: "로그 수준",
+    lines: "줄 수",
+    filters: "로그 필터",
     title: '로그',
     all: '전체',
     searchPlaceholder: '검색...',
@@ -2806,6 +2854,26 @@ export default {
 
   // 사용량
   usage: {
+    costStates: {
+      unknown: "미기록",
+      partial: "일부 비용만 기록됨",
+      reported: "공급자 보고 비용",
+      estimated: "추정 비용",
+      mixed: "보고 비용 및 추정 비용 포함",
+    },
+    pricing: {
+      title: "모델 단가",
+      selectionHelp: "설정된 공급자와 모델을 선택하거나 ID를 입력한 후 Enter를 누르세요.",
+      catalogError: "설정된 공급자와 모델을 불러오지 못했습니다. ID를 직접 입력할 수 있습니다.",
+      help: "사용자 지정 단가가 없으면 models.dev에서 일치하는 모델의 가격으로 비용을 추정합니다. 백만 토큰당 USD입니다. 공급자와 모델 ID를 정확히 일치시키세요(예: global). 비용이 반환되지 않을 때만 추정합니다. 캐시 단가가 비어 있으면 알 수 없음입니다. 이후 호출부터 적용되며 과거 비용은 다시 계산하지 않습니다.",
+      provider: "공급자 ID",
+      model: "모델 ID",
+      input: "입력",
+      output: "출력",
+      cacheRead: "캐시 읽기",
+      cacheWrite: "캐시 쓰기",
+      error: "단가를 불러오거나 저장하지 못했습니다. ID, 중복 및 음수 단가를 확인하세요.",
+    },
     title: '사용량 통계',
     refresh: '새로고침',
     totalTokens: '총 토큰 수',
@@ -2817,7 +2885,7 @@ export default {
     cacheHitRate: '캐시 적중률',
     modelBreakdown: '모델별 분포',
     agentBreakdown: 'Agent별 분포',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: '알 수 없음' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: '알 수 없음' },
     dailyTrend: '일별 사용량',
     date: '날짜',
     tokens: '토큰',
@@ -2852,6 +2920,7 @@ export default {
   },
 
   workflow: {
+    listActions: '워크플로 목록 작업',
     quality: { results: "JEV quality observations", rerun: "Edit and rerun from this node", decision: { pass: "Passed", needs_improvement: "Needs improvement", unknown: "Unknown" } },
     title: '워크플로',
     profile: '프로필',
@@ -3261,6 +3330,30 @@ export default {
   },
 
   changelog: {
+    new_0_7_29_1: '채팅 및 그룹 채팅 작업 공간의 파일 트리 메뉴와 차이 보기 도구 모음에서 파일 다운로드 기능을 복원했습니다 (#3268)',
+    new_0_7_29_2: '실시간 활동 알림에서 Antigravity가 Ekko로 잘못 표시되는 문제를 수정했습니다 (#3272)',
+    new_0_7_28_1: 'Antigravity CLI를 추가하여 전역 및 독립 설정 모드의 채팅, 그룹 채팅, 워크플로와 네이티브 설정, MCP, 스킬 관리를 지원합니다 (#3256)',
+    new_0_7_28_2: 'APIKEY.FAN 중계 서비스 페이지를 추가하여 설정된 API 키별 잔액, 오늘 및 누적 사용량, 모델별 내역을 표시합니다 (#3257)',
+    new_0_7_28_3: 'Coding Agent의 수동 업데이트 확인 상태와 업데이트된 CLI 버전 감지를 수정하고 실행 중인 세션을 보호합니다 (#3261)',
+    new_0_7_28_4: 'Claude 응답의 조기 종료, 텍스트 누락 및 중복을 수정하고 최종 출력을 완전하게 저장합니다 (#3260, #3263)',
+    new_0_7_28_5: 'macOS에서 Antigravity 전역 모드가 네이티브 로그인 자격 증명에 접근하지 못하는 문제와 로그인 안내를 수정했습니다 (#3266)',
+    new_0_7_28_6: '기기 연결 탐색에 모니터와 휴대폰 아이콘을 사용하여 연결 메뉴를 더 쉽게 구분할 수 있습니다 (#3262)',
+    new_0_7_27_1: '각 대화 턴의 사용량 카드를 저장하고 Token, 캐시 적중, 비용, 출력 속도를 표시하도록 추가했습니다 (#3241)',
+    new_0_7_27_2: 'Coding Agent 사용량 귀속, 호출별 비용, 누적 통계를 수정하고 중단된 실행의 사용량을 보존하며 늦게 도착한 통계를 반영했습니다 (#3246)',
+    new_0_7_27_3: '그룹 채팅 답변 말풍선에 턴별 사용량 카드를 추가하고 기록을 불러올 때도 복원하도록 개선했습니다 (#3248)',
+    new_0_7_27_4: '사용자 지정 가격 설정에서 구성된 공급자와 모델을 선택할 수 있게 하고 ID 직접 입력 및 로딩 오류 안내를 개선했습니다 (#3253)',
+    new_0_7_27_5: 'Codex 컨텍스트 한도 초과 후 세션 복구를 수정했습니다. 다음 메시지는 새 컨텍스트로 이어지며 Studio 기록과 작업 공간을 유지합니다 (#3204)',
+    new_0_7_27_6: 'DeepSeek Chat Completions 사용 시 Grok 메시지 역할 호환성을 수정했습니다 (#3244)',
+    new_0_7_27_7: '같은 연결에서 Profile을 전환한 후 대화 기록이 비어 보이는 문제를 수정했습니다 (#3242)',
+    new_0_7_27_8: 'Studio 서랍 크기와 작업 공간 선택기 레이아웃을 통일하고 그룹 Agent 설정 서랍의 겹침 및 로딩 문제를 수정했으며 Enter로 세션 이름이 잘못 변경되는 것을 방지했습니다 (#3247)',
+    new_0_7_26_1: 'Studio 탐색, 페이지 헤더, 목록 작업을 통일하고 모바일 레이아웃을 개선했습니다 (#3232)',
+    new_0_7_26_2: '페이지 로딩 표시를 통일하고 동작 줄이기 모드에서도 로고 로딩 표시가 잘 보이도록 개선했습니다 (#3232, #3236)',
+    new_0_7_26_3: '사용자 지정 배경과 유리 효과의 계층을 개선하고 창 가장자리와 둥근 모서리를 수정했으며 마이크 버튼에 테마 색상을 적용했습니다 (#3236)',
+    new_0_7_26_4: '플랫폼에 맞게 데스크톱 창 제어 버튼의 위치와 스타일을 조정하고 Windows 기본 둥근 모서리를 유지했습니다 (#3234, #3235)',
+    new_0_7_26_5: 'Gateway 자동 시작을 명시적으로 활성화하도록 변경하고 Profile 목록 로딩에서 CLI 검사를 분리했으며 메시지 말풍선의 최초 렌더링을 수정했습니다 (#3233)',
+    new_0_7_26_6: '사용 비용 기록과 사용자 지정 모델 단가를 추가하고 로컬 모델 카탈로그 기반 비용 추정 및 컨텍스트 한도 매칭을 개선했습니다 (#3226)',
+    new_0_7_26_7: 'DSH 레지스트리 프리셋과 네이티브 플러그인 설정을 지원하고 플러그인 페이지가 사용 가능한 공간을 채우지 못하는 문제를 수정했습니다 (#3218)',
+    new_0_7_26_8: 'Agent Manager의 밝은 카드에서 Cursor 로고가 잘 보이지 않던 문제를 수정했습니다 (#3222)',
     new_0_7_25_1: '채팅, 그룹 채팅, 워크플로에서 Cursor CLI를 지원하며 네이티브 설정, 스킬 관리, 분리된 Studio MCP 설정을 추가했습니다 (#3110)',
     new_0_7_25_2: '설정 가능한 JEV 메모리 검색, 관련성 필터링, 쓰기 검토, 스킬 매칭, 학습 사전 검사를 추가했습니다 (#3159, #3161, #3169)',
     new_0_7_25_3: '선택적으로 활성화할 수 있는 JEV 브라우저 대상 매칭과 작업 검증, 그룹 요약 검토와 메시지 라우팅, 워크플로 품질 검사를 추가했습니다 (#3208, #3211)',

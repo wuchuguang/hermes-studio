@@ -17,7 +17,8 @@ describe('ChatPanel session clicks', () => {
     expect(source).toContain('bridge.openChatWindow(sessionId, profile || undefined)')
     expect(source).toContain('window.open(sessionHref(sessionId, profile), "_blank", "noopener,noreferrer")')
     expect(source).toContain('openSessionInNewTab(sessionId, chatStore.activeSession?.profile || null)')
-    expect(source).toContain('v-if="currentMode === \'chat\' && !standalone"')
+    expect(source).toContain('v-if="hasPageSidebar"')
+    expect(source).toContain('!props.standalone && currentMode.value === "chat"')
     expect(source).toContain('<header v-if="!standalone" class="chat-header">')
   })
 
@@ -45,7 +46,7 @@ describe('ChatPanel session clicks', () => {
     expect(source).toContain('contextSession.value?.codingAgentMode !== "global"')
     expect(source).toContain('requestedSession?.codingAgentMode === "global"')
     expect(readFileSync('packages/client/src/stores/hermes/chat.ts', 'utf8')).toContain(
-      "session?.codingAgentMode === 'global' && isCodingAgentLikeSession(session)",
+      "session?.codingAgentMode === 'global' && isProviderAgentSession(session)",
     )
     expect(source).toContain('const sessionModelSwitching = ref(false)')
     expect(source).toContain('sessionModelSwitching.value = true')
@@ -96,7 +97,7 @@ describe('ChatPanel session clicks', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
     expect(AGENT_OPTIONS).toContainEqual({ label: 'Ekko', value: 'ekko-agent' })
-    expect(source).toContain('const newChatAgentOptions = computed(() => AGENT_OPTIONS.map(')
+    expect(source).toContain('const newChatAgentOptions = computed(() => AGENT_OPTIONS.filter(')
     expect(source).not.toContain('showEkkoAgentEntry')
     expect(source).not.toContain('import.meta.env.DEV')
   })

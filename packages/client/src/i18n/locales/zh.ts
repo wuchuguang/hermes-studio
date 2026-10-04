@@ -365,6 +365,7 @@ export default {
 
   // 通用
   common: {
+    close: '关闭',
     loading: '加载中...',
     cancel: '取消',
     delete: '删除',
@@ -468,6 +469,34 @@ export default {
     toolsClearExcluded: '清空排除',
   },
 
+  apiRelay: {
+    title: "API 中转",
+    headline: "一站接入主流 AI 模型",
+    description: "APIKEY.FAN 是 Ekko Studio 的合作中转服务，统一接入 Claude、ChatGPT、Grok、Gemini、智谱、Kimi、DeepSeek 和 MiniMax，兼容官方 API 与 SDK。",
+    zhipu: "智谱",
+    viewNow: "立即查看",
+    apiCompatible: "官方 API 兼容",
+    usageTitle: "密钥用量",
+    usageScope: "涵盖有权限访问的 Profile。同一服务和密钥合并展示，不同密钥分别统计。",
+    loadFailed: "用量加载失败，请点击刷新重试。",
+    remaining: "剩余额度",
+    sources: "配置来源",
+    keyActive: "密钥有效",
+    keyInactive: "密钥已失效",
+    requests: "请求数",
+    spend: "费用",
+    today: "今日",
+    total: "累计",
+    modelUsage: "按模型查看用量",
+    model: "模型",
+    errors: {
+      unauthorized: "密钥认证失败，请检查配置的密钥。",
+      timeout: "用量查询超时，请点击刷新重试。",
+      unavailable: "暂时无法连接用量服务，请点击刷新重试。",
+      invalid_response: "用量接口返回的数据格式无法识别。",
+    },
+  },
+
   sidebar: {
     desktopUpdatePreparing: "正在准备更新",
     desktopUpdateStopping: "正在停止下载…",
@@ -569,6 +598,7 @@ export default {
     ekkoDescription: 'Ekko 随 Studio 提供，无需单独安装、升级或删除。',
     version: '版本',
     codingAgentDescription: '可由 Studio 安装、检查更新和删除。',
+    antigravityDescription: '通过官方安装指南安装 Antigravity CLI（agy）并在终端完成登录，再刷新。支持全局和模型隔离模式；Studio 不托管安装、更新或卸载。',
     cursorDescription: '请从 https://cursor.com/install 安装 Cursor CLI（`agent`），然后刷新。Studio 不会用 npm 安装。',
     cursorNoManagedConfig: '启动不会改写 ~/.cursor/mcp.json。托管服务写在本次会话的运行时副本里。',
     updateToVersion: '更新到 {version}',
@@ -1013,6 +1043,19 @@ export default {
 
   // 对话
   chat: {
+    runUsageOutput: "输出 token",
+    runUsageInput: "输入 token",
+    runUsageCacheRate: "缓存命中率",
+    runUsageCacheRateHint: "命中缓存的输入 token ÷ 本轮全部输入 token（含缓存读取和写入）",
+    runUsageCache: "缓存命中",
+    runUsageCost: "预估费用",
+    runUsageSpeed: "Token 速度",
+    runUsageSpeedHint: "本轮输出 token ÷ 模型请求总耗时（含首 token 等待，不含工具执行）",
+    runUsageAverageSpeed: "平均速度",
+    runUsageAverageSpeedHint: "本轮输出 token / 整轮耗时，包含工具执行和等待时间；CLI 未提供模型请求耗时。",
+    runUsageEstimatedSpeed: "估算速度",
+    runUsageEstimatedSpeedHint: "输出 token /（本轮耗时 − 工具占用时间）。并行工具重叠时间只扣一次；仍包含启动、网络等开销，非实测模型速度。",
+
     contextRemaining: '剩余',
     contextClickToEdit: '点击编辑上下文长度',
     contextEditTitle: '编辑上下文长度',
@@ -1225,6 +1268,9 @@ export default {
     newCliChat: '新建 CLI',
     deleteSession: '确定删除此会话？',
     sessionDeleted: '会话已删除',
+    sessionListActions: '会话列表操作',
+    filterByProfile: '按 Profile 筛选',
+    selectedSessions: '已选 {count} 项',
     toggleBatchMode: '批量选择',
     selectAll: '全选',
     confirmBatchDelete: '确定删除选中的 {count} 个会话？',
@@ -1311,6 +1357,7 @@ export default {
     modelSet: '模型已设置',
     modelSwitching: '正在切换模型...',
     modelSetFailed: '设置模型失败',
+    builtinAgent: '内置 Agent',
     other: '其他',
     runFailed: '运行失败',
     error: '错误',
@@ -1344,6 +1391,7 @@ export default {
   },
 
   workflow: {
+    listActions: '工作流列表操作',
     quality: { results: "JEV 质量观察", rerun: "编辑并从此节点重跑", decision: { pass: "已通过", needs_improvement: "需要改进", unknown: "未知" } },
     title: '工作流',
     profile: '配置',
@@ -1862,6 +1910,7 @@ export default {
 
   // 技能
   skills: {
+    filterBySource: "按来源筛选",
     title: '技能',
     targetFilter: '运行时',
     targets: {
@@ -2075,10 +2124,6 @@ export default {
 
   // 模型
   models: {
-    opencodeFreeHint: "无需账号或 API key，免费模型可能受到限流。",
-    opencodeFreeLoading: "正在后台加载免费模型…",
-    opencodeFreeRetry: "免费提供商检测或目录刷新失败，将自动重试并保留缓存模型。",
-    opencodeFreeUpgrade: "请更新 Hermes Agent 以使用 OpenCode Free。",
     title: '模型',
     searchPlaceholder: '搜索模型...',
     noResults: '无结果',
@@ -2447,6 +2492,10 @@ export default {
 
   // 日志
   logs: {
+    file: "日志文件",
+    level: "日志级别",
+    lines: "行数",
+    filters: "筛选日志",
     title: '日志',
     all: '全部',
     searchPlaceholder: '搜索...',
@@ -3628,6 +3677,26 @@ export default {
 
   // 用量统计
   usage: {
+    costStates: {
+      unknown: "未记录",
+      partial: "部分费用，其余未记录",
+      reported: "上游返回费用",
+      estimated: "估算费用",
+      mixed: "含上游费用与估算费用",
+    },
+    pricing: {
+      title: "模型单价",
+      selectionHelp: "可选择已配置的供应商及其模型，也可输入 ID 后按回车。",
+      catalogError: "无法加载已配置的供应商和模型，仍可手动输入 ID。",
+      help: "未设置自定义单价时，自动使用 models.dev 中匹配模型的价格估算。单位为美元／百万 Token。按供应商和模型 ID 精确匹配（例如 global），仅在上游未返回费用时估算。缓存单价留空表示未知。修改从后续调用生效，不重算历史费用。",
+      provider: "供应商 ID",
+      model: "模型 ID",
+      input: "输入",
+      output: "输出",
+      cacheRead: "缓存读取",
+      cacheWrite: "缓存写入",
+      error: "无法读取或保存单价。请检查供应商、模型是否填写或重复，单价必须为非负数。",
+    },
     title: '用量统计',
     refresh: '刷新',
     totalTokens: '总 Token 数',
@@ -3639,7 +3708,7 @@ export default {
     cacheHitRate: '缓存命中率',
     modelBreakdown: '模型分布',
     agentBreakdown: 'Agent 分布',
-    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', ekkoAgent: 'Ekko', unknown: '未知' },
+    agents: { hermes: 'Hermes Agent', claudeCode: 'Claude', codex: 'Codex', pi: 'Pi', grok: 'Grok', opencode: 'OpenCode', dsh: 'DeepSeek Harness', cursor: 'Cursor', antigravity: 'Antigravity', ekkoAgent: 'Ekko', unknown: '未知' },
     dailyTrend: '每日用量',
     date: '日期',
     tokens: 'Token',
@@ -3758,6 +3827,30 @@ export default {
 
   // 更新日志
   changelog: {
+    new_0_7_29_1: '恢复聊天和群聊工作区文件树菜单及差异工具栏中的文件下载功能 (#3268)',
+    new_0_7_29_2: '修复实时活动通知将 Antigravity 错误识别为 Ekko 的问题 (#3272)',
+    new_0_7_28_1: '新增 Antigravity CLI，支持全局和独立配置模式下的聊天、群聊与工作流，并接入原生配置、MCP 和技能管理 (#3256)',
+    new_0_7_28_2: '新增 APIKEY.FAN 中转服务页面，可按已配置的 API Key 查看余额、今日与累计用量及模型明细 (#3257)',
+    new_0_7_28_3: '修复编程 Agent 手动检查更新后的状态和更新版本识别，并保护正在运行的会话 (#3261)',
+    new_0_7_28_4: '修复 Claude 回复提前结束、内容缺失或重复的问题，完整保存最终输出 (#3260、#3263)',
+    new_0_7_28_5: '修复 macOS 上 Antigravity 全局模式无法读取原生登录凭据的问题，并更正登录提示 (#3266)',
+    new_0_7_28_6: '设备连接导航改用显示器与手机图标，更清晰地区分连接入口 (#3262)',
+    new_0_7_27_1: '聊天新增持久化的每轮用量卡片，显示 Token、缓存命中、费用与输出速度 (#3241)',
+    new_0_7_27_2: '修复编程 Agent 用量归属、单次费用与累计统计，保留中断任务用量并更新延迟返回的统计 (#3246)',
+    new_0_7_27_3: '群聊回复气泡新增每轮用量卡片，加载历史消息时可恢复显示 (#3248)',
+    new_0_7_27_4: '自定义模型定价支持选择已配置的供应商和模型，保留手动输入 ID 并改善加载失败提示 (#3253)',
+    new_0_7_27_5: '修复 Codex 上下文超限后的会话恢复，下一条消息使用新上下文继续，并保留 Studio 历史与工作区 (#3204)',
+    new_0_7_27_6: '修复 Grok 使用 DeepSeek Chat Completions 时的消息角色兼容问题 (#3244)',
+    new_0_7_27_7: '修复同一连接切换 Profile 后会话历史空白的问题 (#3242)',
+    new_0_7_27_8: '统一 Studio 抽屉尺寸和工作区选择器布局，修复群聊 Agent 设置抽屉的遮挡与加载问题，并避免回车误提交会话重命名 (#3247)',
+    new_0_7_26_1: '统一 Studio 导航栏、页面标题与列表操作，并优化移动端布局 (#3232)',
+    new_0_7_26_2: '统一页面加载反馈，改进 Logo 加载动画及减少动态效果模式下的可见性 (#3232、#3236)',
+    new_0_7_26_3: '优化自定义背景与毛玻璃层次，修复窗口边缘和圆角衔接，并让麦克风按钮跟随主题配色 (#3236)',
+    new_0_7_26_4: '按平台调整桌面窗口控制按钮的位置与样式，并保留 Windows 原生窗口圆角 (#3234、#3235)',
+    new_0_7_26_5: 'Gateway 自动启动改为显式开启，Profile 列表加载不再等待 CLI 检查，并修复消息气泡首次渲染 (#3233)',
+    new_0_7_26_6: '用量统计新增费用记录与自定义模型单价，支持基于本地模型目录估算费用，并改进模型上下文限制匹配 (#3226)',
+    new_0_7_26_7: '兼容 DSH 注册表预设与原生插件配置，修复插件页面未填满可用区域的问题 (#3218)',
+    new_0_7_26_8: '修复 Agent 管理器中 Cursor 图标在浅色卡片上的显示 (#3222)',
     new_0_7_25_1: '新增 Cursor CLI 支持，可用于聊天、群聊和工作流，并提供原生设置、技能管理与独立的 Studio MCP 配置 (#3110)',
     new_0_7_25_2: '新增可配置的 JEV 记忆召回、相关性过滤、写入审核、技能匹配与学习预检查 (#3159、#3161、#3169)',
     new_0_7_25_3: '新增可选的 JEV 浏览器目标匹配与操作验证、群聊摘要审核与消息路由，以及工作流质量检查 (#3208、#3211)',

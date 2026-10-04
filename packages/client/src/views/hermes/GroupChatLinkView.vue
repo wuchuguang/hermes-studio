@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import PageLoading from '@/components/common/PageLoading.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -130,7 +132,7 @@ function getAgentModelGroups(profile: string) {
             ? 'pi'
             : selectedAgentType.value === 'grok'
               ? 'grok'
-            : selectedAgentType.value === 'cursor'
+            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
               ? 'cursor'
             : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
               ? 'opencode'
@@ -181,7 +183,7 @@ const agentReasoningEffortOptions = computed(() => [
   { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
   { label: t('chat.reasoningEffort.options.max'), value: 'max' },
 ])
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -619,7 +621,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="group-chat-link-view">
+  <PageLoading :show="loading" class="group-chat-link-view">
     <section class="link-card">
       <img src="/logo.png" alt="" class="link-logo">
       <h1>
@@ -632,7 +634,7 @@ onUnmounted(() => {
         {{ editingConnection?.cloudOrigin || parentOrigin }}
       </code>
 
-      <div v-if="loading" class="link-status">{{ t('common.loading') }}</div>
+      <div v-if="loading" class="link-status"></div>
       <div v-else-if="connected" class="link-success">
         <strong>{{ t('groupChat.agentLinkConnected') }}</strong>
         <NButton type="primary" @click="closeWindow">{{ t('groupChat.agentLinkClose') }}</NButton>
@@ -799,19 +801,25 @@ onUnmounted(() => {
       <p v-if="error" class="link-error" role="alert">{{ error }}</p>
       <p class="link-security">{{ t('groupChat.agentLinkSecurityHint') }}</p>
     </section>
-  </main>
+  </PageLoading>
 </template>
 
 <style scoped lang="scss">
 @use '@/styles/variables' as *;
 
 .group-chat-link-view {
-  min-height: calc(100 * var(--vh));
+  min-height: 100%;
   box-sizing: border-box;
   display: grid;
   place-items: center;
   padding: 24px;
   background: $bg-primary;
+}
+
+.group-chat-link-view > :deep(.page-loading-content) {
+  width: 100%;
+  display: grid;
+  place-items: center;
 }
 
 .link-card {
