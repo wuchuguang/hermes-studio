@@ -1344,6 +1344,7 @@ export default {
     dirSearchSearching: 'Searching…',
     dirSearchNoResults: 'No matching directories',
     buildRefreshAvailable: 'New version available',
+    desktopOffline: 'Mac Hermes desktop is not running — chats will not start. Launch it on the Mac, then this notice disappears.',
     buildRefreshReload: 'Refresh',
     dirSearchToggle: 'Search dir',
     workspaceExtraAdd: 'Add directory',

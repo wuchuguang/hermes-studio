@@ -1344,6 +1344,7 @@ export default {
     dirSearchSearching: '搜索中…',
     dirSearchNoResults: '没有匹配的目录',
     buildRefreshAvailable: '有新版本可用',
+    desktopOffline: 'Mac 端 Hermes 未运行 — 消息无法发送。请在 Mac 上启动 Hermes 桌面端，本提示会自动消失。',
     buildRefreshReload: '刷新',
     dirSearchToggle: '搜索目录',
     workspaceExtraAdd: '添加目录',

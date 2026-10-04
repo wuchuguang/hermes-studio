@@ -1335,6 +1335,7 @@ export default {
     dirSearchSearching: '搜尋中…',
     dirSearchNoResults: '沒有符合的目錄',
     buildRefreshAvailable: '有新版本可用',
+    desktopOffline: 'Mac 端 Hermes 未執行 — 訊息無法傳送。請在 Mac 上啟動 Hermes 桌面端，本提示會自動消失。',
     buildRefreshReload: '重新整理',
     dirSearchToggle: '搜尋目錄',
     workspaceExtraAdd: '新增目錄',

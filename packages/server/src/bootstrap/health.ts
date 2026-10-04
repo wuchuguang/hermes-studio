@@ -100,6 +100,18 @@ const healthService = new StudioHealthService({
 
 configureHealthController(healthService)
 
+/**
+ * Anonymous, minimal payload for the web/PWA boot screen: is the local
+ * desktop-side agent bridge (the Mac Hermes runtime) reachable right now.
+ * Deliberately exposes a single boolean — no endpoints, pids or errors — so it
+ * is safe to serve without auth; clients use it to show "Mac 端未运行"
+ * instead of an infinite loading spinner.
+ */
+export async function getDesktopRuntimeHealth(): Promise<{ agent_bridge_reachable: boolean }> {
+  const health = await getAgentBridgeHealth()
+  return { agent_bridge_reachable: health.reachable === true }
+}
+
 export {
   checkLatestVersion,
   healthCheck,

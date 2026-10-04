@@ -30,6 +30,9 @@ import { isStoredSuperAdmin } from "@/api/client";
 import {
   useClientBuildRefresh,
 } from "@/composables/useClientBuildRefresh";
+import {
+  useDesktopRuntimeStatus,
+} from "@/composables/useDesktopRuntimeStatus";
 import AuthEventListener from "@/components/auth/AuthEventListener.vue";
 import { desktopBridge } from "@/utils/desktop-bridge";
 import { naiveLocaleFor } from "@/constants/naiveLocale";
@@ -48,6 +51,7 @@ const MobileNavigationDrawer = defineAsyncComponent(
 
 const { newBuildAvailable, reload: reloadForNewBuild } =
   useClientBuildRefresh();
+const { desktopOffline } = useDesktopRuntimeStatus();
 const AppSidebar = defineAsyncComponent(
   async () => (await import("@/components/layout/AppSidebar.vue")).default,
 );
@@ -356,6 +360,12 @@ useKeyboard();
               {{ t("chat.buildRefreshAvailable") }} ·
               {{ t("chat.buildRefreshReload") }}
             </button>
+            <div
+              v-if="desktopOffline && !isLoginPage"
+              class="desktop-offline-bar"
+            >
+              {{ t("chat.desktopOffline") }}
+            </div>
             <div class="app-box">
               <div
                 v-if="nodeVersionLow && !isStandaloneChatPage"
@@ -971,5 +981,26 @@ useKeyboard();
 
 .build-refresh-pill:active {
   opacity: 0.85;
+}
+
+.desktop-offline-bar {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  z-index: 100;
+  padding: 4px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #b91c1c;
+  background-color: #fee2e2;
+  border-bottom: 1px solid #fecaca;
+  text-align: center;
+  line-height: 1.4;
+}
+
+html.dark .desktop-offline-bar {
+  color: #fca5a5;
+  background-color: rgba(127, 29, 29, 0.35);
+  border-bottom-color: rgba(185, 28, 28, 0.4);
 }
 </style>

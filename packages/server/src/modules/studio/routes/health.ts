@@ -2,11 +2,21 @@ import Router from '@koa/router'
 import { readFile } from 'fs/promises'
 import { join, resolve } from 'path'
 import * as ctrl from '../controllers/health'
+import { getDesktopRuntimeHealth } from '../../../bootstrap/health'
 
 export const healthRoutes = new Router()
 
 healthRoutes.get('/livez', ctrl.livenessCheck)
 healthRoutes.get('/health', ctrl.healthCheck)
+
+// Anonymous boot-screen probe: is the local desktop-side Hermes runtime
+// (agent bridge) reachable? Single-boolean payload, safe without auth.
+// Web/PWA clients poll this while waiting for the first authed page so a
+// shut-down Mac shows "desktop not running" instead of an endless spinner.
+healthRoutes.get('/desktop-runtime', async (ctx) => {
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = await getDesktopRuntimeHealth()
+})
 
 // Client shell build id: the first hashed asset referenced by index.html.
 // PWA clients poll this and prompt for a reload when it changes — the SW
