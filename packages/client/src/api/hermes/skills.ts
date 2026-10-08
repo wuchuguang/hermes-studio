@@ -62,6 +62,14 @@ export interface MemoryData {
   soul_mtime: number | null
 }
 
+export interface ProjectMemoryInfo {
+  file: string
+  name: string
+  content: string
+  size: number
+  mtime: number | null
+}
+
 export interface SkillsData {
   categories: SkillCategory[]
   archived: SkillInfo[]
@@ -160,6 +168,18 @@ export async function saveMemory(section: 'memory' | 'user' | 'soul', content: s
   await request('/api/hermes/memory', {
     method: 'POST',
     body: JSON.stringify({ section, content }),
+  })
+}
+
+export async function fetchProjectMemories(): Promise<ProjectMemoryInfo[]> {
+  const res = await request<{ projects: ProjectMemoryInfo[] }>('/api/hermes/memory/projects')
+  return res.projects || []
+}
+
+export async function saveProjectMemory(file: string, content: string): Promise<void> {
+  await request('/api/hermes/memory/projects', {
+    method: 'POST',
+    body: JSON.stringify({ file, content }),
   })
 }
 

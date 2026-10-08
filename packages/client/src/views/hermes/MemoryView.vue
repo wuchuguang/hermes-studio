@@ -4,7 +4,7 @@ import PageHeader from '@/components/layout/PageHeader.vue'
 import { ref, onMounted, computed, defineAsyncComponent } from 'vue'
 import { NButton, useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
-import { fetchMemory, saveMemory, type MemoryData } from '@/api/hermes/skills'
+import { fetchMemory, saveMemory, fetchProjectMemories, saveProjectMemory, type MemoryData, type ProjectMemoryInfo } from '@/api/hermes/skills'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 const MarkdownRenderer = defineAsyncComponent(async () => (await import('@/components/hermes/chat/MarkdownRenderer.vue')).default)
@@ -14,7 +14,8 @@ const message = useMessage()
 const profilesStore = useProfilesStore()
 const loading = ref(true)
 const data = ref<MemoryData | null>(null)
-const editingSection = ref<'memory' | 'user' | 'soul' | null>(null)
+const projects = ref<ProjectMemoryInfo[]>([])
+const editingSection = ref<'memory' | 'user' | 'soul' | string | null>(null)
 const editContent = ref('')
 const saving = ref(false)
 
@@ -27,6 +28,7 @@ async function loadMemory() {
       await profilesStore.fetchProfiles()
     }
     data.value = await fetchMemory()
+    projects.value = await fetchProjectMemories().catch(() => [])
   } catch (err: any) {
     console.error('Failed to load memory:', err)
     message.error(t('memory.loadFailed'))
@@ -35,9 +37,12 @@ async function loadMemory() {
   }
 }
 
-function startEdit(section: 'memory' | 'user' | 'soul') {
+function startEdit(section: 'memory' | 'user' | 'soul' | string) {
   editingSection.value = section
-  editContent.value = data.value?.[section] || ''
+  if (section === 'memory') editContent.value = data.value?.memory || ''
+  else if (section === 'user') editContent.value = data.value?.user || ''
+  else if (section === 'soul') editContent.value = data.value?.soul || ''
+  else editContent.value = projects.value.find((p) => p.file === section)?.content || ''
 }
 
 function cancelEdit() {
@@ -47,9 +52,14 @@ function cancelEdit() {
 
 async function handleSave() {
   if (!editingSection.value) return
+  const section = editingSection.value
   saving.value = true
   try {
-    await saveMemory(editingSection.value, editContent.value)
+    if (section === 'memory' || section === 'user' || section === 'soul') {
+      await saveMemory(section, editContent.value)
+    } else {
+      await saveProjectMemory(section, editContent.value)
+    }
     await loadMemory()
     editingSection.value = null
     editContent.value = ''
@@ -78,6 +88,20 @@ const soulEmpty = computed(() => !data.value?.soul?.trim())
 const displayMemory = computed(() => (data.value?.memory || '').replace(/§/g, '\n\n'))
 const displayUser = computed(() => (data.value?.user || '').replace(/§/g, '\n\n'))
 const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n'))
+
+// 诊断：每个记忆源的注入状态
+const diagnostics = computed(() => {
+  const d = data.value
+  if (!d) return []
+  const items = [
+    { key: 'MEMORY', present: !!d.memory?.trim(), size: d.memory?.length || 0, mtime: d.memory_mtime },
+    { key: 'USER', present: !!d.user?.trim(), size: d.user?.length || 0, mtime: d.user_mtime },
+    { key: 'SOUL', present: !!d.soul?.trim(), size: d.soul?.length || 0, mtime: d.soul_mtime },
+    ...projects.value.map((p) => ({ key: p.name, present: !!p.content.trim(), size: p.size, mtime: p.mtime })),
+  ]
+  return items
+})
+const injectedCount = computed(() => diagnostics.value.filter((i) => i.present).length)
 </script>
 
 <template>
@@ -96,6 +120,16 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
       </NButton>
     </header>
     </PageHeader>
+
+    <!-- 记忆诊断条 -->
+    <div v-if="data" class="diagnostics-bar">
+      <span class="diag-summary">
+        {{ t('memory.diagSummary', { count: injectedCount, total: diagnostics.length }) }}
+      </span>
+      <span v-for="item in diagnostics" :key="item.key" class="diag-chip" :class="{ 'diag-active': item.present }" :title="`${item.key} · ${item.size}B · ${item.mtime ? formatTime(item.mtime) : '-'}`">
+        <span class="diag-dot"></span>{{ item.key }}
+      </span>
+    </div>
 
     <div class="memory-content">
       <div v-if="loading && !data" class="memory-loading"></div>
@@ -238,6 +272,44 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
               </div>
             </div>
           </div>
+
+          <!-- Project Memories -->
+          <div class="memory-section project-section">
+            <div class="section-header">
+              <div class="section-title-row">
+                <span class="section-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                </span>
+                <span class="section-title">{{ t('memory.projects') }}</span>
+                <span class="section-mtime">{{ projects.length }}</span>
+              </div>
+            </div>
+            <div class="section-body project-list">
+              <p v-if="projects.length === 0" class="empty-text">{{ t('memory.noProjects') }}</p>
+              <div v-for="p in projects" :key="p.file" class="project-item">
+                <div class="project-header">
+                  <span class="project-name">{{ p.name }}</span>
+                  <span class="project-meta">{{ p.size }}B · {{ p.mtime ? formatTime(p.mtime) : '' }}</span>
+                  <NButton v-if="editingSection !== p.file" size="tiny" quaternary @click="startEdit(p.file)">
+                    {{ t('common.edit') }}
+                  </NButton>
+                </div>
+                <div v-if="editingSection !== p.file" class="project-body">
+                  <MarkdownRenderer v-if="p.content.trim()" :content="p.content.replace(/§/g, '\n\n')" />
+                  <p v-else class="empty-text">{{ t('memory.noProjects') }}</p>
+                </div>
+                <div v-else class="section-edit">
+                  <textarea v-model="editContent" class="edit-textarea" spellcheck="false"></textarea>
+                  <div class="edit-actions">
+                    <NButton size="small" @click="cancelEdit">{{ t('common.cancel') }}</NButton>
+                    <NButton size="small" type="primary" :loading="saving" @click="handleSave">{{ t('common.save') }}</NButton>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
     </div>
   </PageLoading>
@@ -270,13 +342,15 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
 }
 
 .memory-sections {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
   flex: 1;
   min-height: 0;
 
   @media (max-width: $breakpoint-mobile) {
-    flex-direction: column;
+    grid-template-columns: 1fr;
+    overflow-y: auto;
   }
 }
 
@@ -368,5 +442,101 @@ const displaySoul = computed(() => (data.value?.soul || '').replace(/§/g, '\n\n
   justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
+}
+
+.diagnostics-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 20px 0;
+  flex-shrink: 0;
+}
+
+.diag-summary {
+  font-size: 12px;
+  color: $text-secondary;
+  margin-right: 4px;
+}
+
+.diag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: $font-code;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid $border-color;
+  color: $text-muted;
+  background: transparent;
+  cursor: default;
+
+  &.diag-active {
+    color: $text-primary;
+    border-color: rgba($accent-primary, 0.35);
+    background: rgba($accent-primary, 0.08);
+  }
+}
+
+.diag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.project-section {
+  min-width: 260px;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.project-item {
+  border: 1px solid $border-color;
+  border-radius: $radius-sm;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.project-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: $bg-secondary;
+  min-height: 32px;
+}
+
+.project-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: $text-primary;
+  font-family: $font-code;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-meta {
+  font-size: 11px;
+  color: $text-muted;
+  flex: 1;
+  white-space: nowrap;
+}
+
+.project-body {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 10px 12px;
+
+  :deep(.markdown-body) {
+    font-size: 12px;
+  }
 }
 </style>

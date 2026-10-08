@@ -2075,6 +2075,9 @@ export default {
     soul: 'Soul',
     noSoul: 'No soul configuration yet.',
     soulPlaceholder: 'Write soul configuration...',
+    projects: 'Project Memories',
+    noProjects: 'No project memories.',
+    diagSummary: '{count}/{total} memory sources injected into system prompt',
   },
 
   // Models

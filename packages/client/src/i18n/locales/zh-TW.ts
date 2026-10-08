@@ -2109,6 +2109,9 @@ export default {
     soul: '靈魂',
     noSoul: '目前無靈魂設定。',
     soulPlaceholder: '輸入靈魂設定...',
+    projects: '專案記憶',
+    noProjects: '暫無專案記憶。',
+    diagSummary: '{count}/{total} 個記憶源已注入系統提示詞',
   },
 
   // 模型

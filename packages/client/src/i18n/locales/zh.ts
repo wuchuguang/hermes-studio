@@ -2121,6 +2121,9 @@ export default {
     soul: '灵魂',
     noSoul: '暂无灵魂配置。',
     soulPlaceholder: '输入灵魂配置...',
+    projects: '项目记忆',
+    noProjects: '暂无项目记忆。',
+    diagSummary: '{count}/{total} 个记忆源已注入系统提示词',
   },
 
   // 模型
