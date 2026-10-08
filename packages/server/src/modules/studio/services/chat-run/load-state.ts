@@ -60,6 +60,24 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
 
     // Fallback: session lives in ~/.hermes/state.db (e.g. desktop sessions),
     // not in the studio-local DB. Read it read-only from the shared state DB.
+    // Freshness probe: a stale local snapshot (source often mislabeled 'cli')
+    // must not shadow a live state.db session that has grown past it — resume
+    // would keep serving outdated messages. Compare cheap counts first.
+    if (actualDetail) {
+      try {
+        const { getSessionMessageCountFromDbWithProfile } = await import('../../../hermes/services/history/sessions-db')
+        const stateCount = await getSessionMessageCountFromDbWithProfile(sid, 'default')
+        if (stateCount != null && stateCount > (actualDetail.total || 0)) {
+          const freshDetail = await getSessionDetailPaginatedFromDbWithProfile(sid, 'default')
+          if (freshDetail) {
+            actualDetail = freshDetail as unknown as PaginatedSessionDetailResult
+            logger.info('[chat-run-socket] session %s local snapshot stale (< %d), loaded from state.db', sid, stateCount)
+          }
+        }
+      } catch (probeErr) {
+        logger.warn(probeErr, '[chat-run-socket] state.db freshness probe failed for %s', sid)
+      }
+    }
     if (!actualDetail) {
       try {
         const fallbackDetail = await getSessionDetailPaginatedFromDbWithProfile(sid, 'default')
