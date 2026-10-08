@@ -968,6 +968,27 @@ export async function getSessionDetailPaginatedFromDbWithProfile(
   }
 }
 
+export async function getSessionMessageCountFromDbWithProfile(
+  sessionId: string,
+  profile: string,
+): Promise<number | null> {
+  const db = await openSessionDb(profile)
+  try {
+    const chain = loadSessionChain(db, sessionId)
+    if (!chain.length) return null
+    const ids = chain.map(session => session.id)
+    const placeholders = ids.map(() => '?').join(', ')
+    const totalRow = db.prepare(`
+      SELECT COUNT(*) AS total
+      FROM messages
+      WHERE session_id IN (${placeholders})
+    `).get(...ids) as { total: number } | undefined
+    return Number(totalRow?.total || 0)
+  } finally {
+    db.close()
+  }
+}
+
 export async function getExactSessionDetailFromDbWithProfile(sessionId: string, profile: string): Promise<HermesSessionDetailRow | null> {
   const { DatabaseSync } = await import('node:sqlite')
   const dbPath = sessionDbPathForProfile(profile)

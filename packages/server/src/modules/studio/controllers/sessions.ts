@@ -15,6 +15,7 @@ import {
   getHermesModelContextLength,
   getHermesSessionDetail,
   getHermesSessionDetailForProfile,
+  getHermesSessionMessageCount,
   getHermesSessionDetailPaginatedForProfile,
   getExactHermesSessionDetailForProfile,
   getCompressionContinuation,
@@ -1233,13 +1234,17 @@ export async function getHermesSession(ctx: any) {
     detailSession = localSession
     if (isHermesAgentAvailable() && (localSession.message_count || 0) > 0) {
       try {
-        const stateSession = profile
-          ? await getHermesSessionDetailForProfile(ctx.params.id, profile)
-          : await getHermesSessionDetail(ctx.params.id)
-        if (stateSession && isHermesHistorySessionSource(stateSession.source)
-          && (stateSession.message_count || stateSession.messages?.length || 0) > (localSession.message_count || localSession.messages?.length || 0)) {
-          detailSession = stateSession
-          detailSource = 'state'
+        // Cheap freshness probe: compare message counts before pulling the
+        // full state.db detail (which can be >1MB for long sessions).
+        const stateCount = await getHermesSessionMessageCount(ctx.params.id, localSessionProfile)
+        if (stateCount != null && stateCount > (localSession.message_count || 0)) {
+          const stateSession = profile
+            ? await getHermesSessionDetailForProfile(ctx.params.id, profile)
+            : await getHermesSessionDetail(ctx.params.id)
+          if (stateSession && isHermesHistorySessionSource(stateSession.source)) {
+            detailSession = stateSession
+            detailSource = 'state'
+          }
         }
       } catch (err) {
         logger.warn(err, 'Hermes Session DB: freshness probe failed, using local snapshot')
