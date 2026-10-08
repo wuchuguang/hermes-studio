@@ -154,7 +154,7 @@ onUnmounted(() => {
             {{ t('chat.profileMissingModelsTip', { profile: profileName }) }}
           </NTooltip>
         </span>
-        <span class="session-item-time">{{ formatTimestampMs(session.createdAt) }}</span>
+        <span class="session-item-time">{{ formatTimestampMs(session.updatedAt || session.createdAt) }}</span>
           <span v-if="usageLabel" class="session-item-usage">{{ usageLabel }}</span>
       </span>
       <span class="session-item-agent-row">
