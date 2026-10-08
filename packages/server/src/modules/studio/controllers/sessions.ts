@@ -1221,11 +1221,44 @@ export async function getHermesSession(ctx: any) {
   // Prefer the Web UI local session store. Hermes state.db can lag behind or
   // miss messages for Bridge-backed runs, while the local store is the source
   // used by chat rendering and compression.
+  // Exception: a live Agent-side session (e.g. desktop) keeps growing in
+  // state.db while the local store only holds a stale snapshot (source often
+  // mislabeled 'cli'). When state.db has more messages for the same id,
+  // prefer the state.db detail.
   const localSession = localGetSessionDetail(ctx.params.id)
+  let detailSession: any = null
+  let detailSource: 'local' | 'state' = 'local'
   const localSessionProfile = (localSession?.profile || 'default') as string
   if (localSession && isHermesHistorySessionSource(localSession.source) && (!profile || localSessionProfile === profile)) {
-    if (denySessionAccess(ctx, localSession)) return
-    ctx.body = { session: await withContinuation(localSession) }
+    detailSession = localSession
+    if (isHermesAgentAvailable() && (localSession.message_count || 0) > 0) {
+      try {
+        const stateSession = profile
+          ? await getHermesSessionDetailForProfile(ctx.params.id, profile)
+          : await getHermesSessionDetail(ctx.params.id)
+        if (stateSession && isHermesHistorySessionSource(stateSession.source)
+          && (stateSession.message_count || stateSession.messages?.length || 0) > (localSession.message_count || localSession.messages?.length || 0)) {
+          detailSession = stateSession
+          detailSource = 'state'
+        }
+      } catch (err) {
+        logger.warn(err, 'Hermes Session DB: freshness probe failed, using local snapshot')
+      }
+    }
+  }
+  if (detailSession) {
+    if (detailSource === 'state') {
+      const matchingLocalSession = localSession && (!profile || localSessionProfile === profile)
+        ? localSession
+        : null
+      detailSession = {
+        ...detailSession,
+        ...(profile ? { profile } : {}),
+        push_enabled: Number(matchingLocalSession?.push_enabled || 0) !== 0 ? 1 : 0,
+      }
+    }
+    if (denySessionAccess(ctx, detailSession)) return
+    ctx.body = { session: await withContinuation(detailSession) }
     return
   }
 
