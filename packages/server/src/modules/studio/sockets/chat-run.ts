@@ -36,6 +36,7 @@ import { getSystemPrompt } from '../public/runs/prompt'
 import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
+import { getHermesSessionMessageCount } from '../public/session-agent-runtime'
 import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../public/profile-config'
 import {
   getChatCodingAgentMcpServers,
@@ -884,9 +885,18 @@ export class ChatRunSocket {
     // #1884), so pinning every read to the handshake profile made `resume` fail and left
     // the conversation permanently blank. Mutating operations keep the stricter
     // connection-scoped check above (see the attachment provenance boundary in `run`).
-    const requireSocketSessionReadAccess = (sessionId: string) => {
-      const session = getSession(sessionId)
-      if (!session) throw new Error('Session not found')
+    const requireSocketSessionReadAccess = async (sessionId: string) => {
+      let session = getSession(sessionId)
+      if (!session) {
+        // Desktop sessions live only in ~/.hermes/state.db until first synced
+        // into the studio-local DB. Without this probe, resume for such
+        // sessions threw 'Session not found' (surfacing client-side as a bare
+        // 'resume timeout') even though loadSessionStateFromDb could serve
+        // them. Cheap COUNT probe against state.db decides.
+        const count = await getHermesSessionMessageCount(sessionId, 'default')
+        if (count == null) throw new Error('Session not found')
+        return 'default'
+      }
       const sessionProfile = String(session.profile || 'default').trim() || 'default'
       if (!profileExists(sessionProfile)) {
         throw new Error(`Profile "${sessionProfile}" does not exist`)
@@ -1178,7 +1188,7 @@ export class ChatRunSocket {
       if (!data.session_id) return
       const sid = data.session_id
       try {
-        requireSocketSessionReadAccess(sid)
+        await requireSocketSessionReadAccess(sid)
       } catch (err) {
         socket.emit('run.failed', {
           event: 'run.failed',
@@ -1188,14 +1198,23 @@ export class ChatRunSocket {
         return
       }
       socket.join(`session:${sid}`)
-      await this.resumeSession(socket, sid)
+      try {
+        await this.resumeSession(socket, sid)
+      } catch (err) {
+        logger.error(err, '[chat-run-socket] resumeSession threw for %s', sid)
+        socket.emit('run.failed', {
+          event: 'run.failed',
+          session_id: sid,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
     })
 
     socket.on('app.resume', async (data: { session_id?: string; id?: string }) => {
       if (!data.session_id || typeof data.id !== 'string' || data.id.length > 128) return
       const sid = data.session_id
       try {
-        requireSocketSessionReadAccess(sid)
+        await requireSocketSessionReadAccess(sid)
       } catch (err) {
         socket.emit('run.failed', {
           event: 'run.failed',
