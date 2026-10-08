@@ -2112,6 +2112,21 @@ export class ChatRunSocket {
     if (!state) {
       state = await loadSessionStateFromDb(sid, this.sessionMap)
       this.sessionMap.set(sid, state)
+    } else {
+      // Freshness check: desktop keeps appending to ~/.hermes/state.db while a
+      // cached SessionState here stays frozen — resume would keep serving the
+      // stale snapshot until process restart. One cheap COUNT probe decides
+      // whether to reload the full state.
+      try {
+        const stateCount = await getHermesSessionMessageCount(sid, 'default')
+        if (stateCount != null && stateCount > (state.messageTotal || 0)) {
+          logger.info('[chat-run-socket] session %s cached state stale (%s < %s), reloading', sid, state.messageTotal, stateCount)
+          state = await loadSessionStateFromDb(sid, this.sessionMap)
+          this.sessionMap.set(sid, state)
+        }
+      } catch (refreshErr) {
+        logger.warn(refreshErr, '[chat-run-socket] resume freshness check failed for %s', sid)
+      }
     }
     await this.reattachBridgeRun(socket, sid, state)
     const resumeEvents = state.isWorking
