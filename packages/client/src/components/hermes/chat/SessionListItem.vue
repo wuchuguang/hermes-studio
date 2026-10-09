@@ -154,8 +154,10 @@ onUnmounted(() => {
             {{ t('chat.profileMissingModelsTip', { profile: profileName }) }}
           </NTooltip>
         </span>
+      </span>
+      <span class="session-item-meta-row">
         <span class="session-item-time">{{ formatTimestampMs(session.updatedAt || session.createdAt) }}</span>
-          <span v-if="usageLabel" class="session-item-usage">{{ usageLabel }}</span>
+        <span v-if="usageLabel" class="session-item-usage">{{ usageLabel }}</span>
       </span>
       <span class="session-item-agent-row">
         <span class="session-item-agent-logo-wrap" :class="{ streaming }">
@@ -324,12 +326,19 @@ onUnmounted(() => {
   box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.12);
 }
 
+.session-item-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 1px;
+}
+
 .session-item-usage {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   font-size: 10px;
   opacity: 0.45;
   font-variant-numeric: tabular-nums;
-  margin-left: 4px;
 }
 
 .session-item-time {

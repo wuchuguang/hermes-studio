@@ -3,6 +3,7 @@
 记录每次代码改动：新增 (Added) / 优化 (Changed) / 修复 (Fixed)。新条目放最上面。
 
 ## [2026-10-08]
+- 优化: 聊天侧栏 SessionListItem 改两行布局——第一行标题独占整行（不再被时间/token 挤压截断），第二行「时间 + token/成本」元信息行（session-item-meta-row）；构建部署 8648，resume 回归内网 370ms/公网 290ms 通过
 - 修复: 会话详情页消息不全（state.db 快照陈旧, 2341b44+1d946d8+3fd52a0）
 - 修复: 新开 desktop 会话 resume 报 'Session not found' 被吞成 resume timeout（dbc5f9a）
 - 修复: 活跃会话在 studio 冻结不更新（sessionMap 缓存永不刷新, 7928a1d）
