@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
+import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
+import type { CodingAgentId } from '@/api/coding-agents'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
+import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
-import { usePageLoadingState } from '@/composables/usePageLoading'
 import PageHeader from '@/components/layout/PageHeader.vue'
 import HeaderSidebarToggle from '@/components/layout/HeaderSidebarToggle.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
@@ -69,7 +73,7 @@ import {
     createBrowserAnnotationAttachment,
     type BrowserAnnotationSubmission,
 } from '@/utils/browser-annotation-submit'
-import { canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
+import { configuredProviderApiMode, canScopedCodingAgentUseProvider } from '@/utils/codingAgentProviders'
 import {
     inferCodingAgentApiMode,
     normalizeCodingAgentApiMode,
@@ -125,8 +129,6 @@ watch(
 const showCreateModal = ref(false)
 const showCloneModal = ref(false)
 const showAddAgentDrawer = ref(false)
-const showGroupChatRefactorNotice = ref(false)
-const pageLoading = usePageLoadingState()
 const showManualRoomLinkModal = ref(false)
 const manualRoomLink = ref('')
 const manualRoomLinkInput = ref<HTMLInputElement | null>(null)
@@ -237,7 +239,6 @@ const toolPanelTransitionReady = ref(false)
 const activeWorkspacePanel = ref<'files' | 'terminal' | 'browser'>('files')
 const desktopBrowserAvailable = hasDesktopBrowserBridge()
 const workspacePanelMobile = ref(window.innerWidth <= 768)
-const GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY = 'hermes.groupChat.refactorNotice.v1.acknowledged'
 const WORKSPACE_PANEL_MIN_WIDTH = 360
 const WORKSPACE_PANEL_DEFAULT_WIDTH = 560
 const WORKSPACE_PANEL_STORAGE_KEY = 'hermes.groupChat.workspacePanelWidth'
@@ -264,9 +265,19 @@ const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
 )
 const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
+const nativeAgentSelections = ref<Record<string, { model: string; reasoningEffort: string }>>({})
+const nativeAgentId = computed(() => (selectedAgentType.value === 'claude' ? 'claude-code' : selectedAgentType.value) as CodingAgentId)
+const nativeAgentSelection = computed(() => nativeAgentSelections.value[selectedAgentType.value] || { model: '', reasoningEffort: '' })
+function updateNativeAgentSelection(selection: { model: string; reasoningEffort: string }) {
+    nativeAgentSelections.value[selectedAgentType.value] = selection
+}
+function handleNativeAgentSelection(selection: { model: string; reasoningEffort: string }) {
+    selectedAgentPresetId.value = null
+    updateNativeAgentSelection(selection)
+}
 const agentModeOptions = computed(() => [
-    { label: t('codingAgents.launchModeGlobal'), value: 'global' },
-    { label: t('codingAgents.launchModeScoped'), value: 'scoped' },
+    { label: t('codingAgents.modelScope'), value: 'scoped' },
+    { label: t('codingAgents.launchModeGlobalShort'), value: 'global' },
 ])
 
 function groupAgentDisplayName(agent: GroupAgentType): string {
@@ -335,27 +346,17 @@ function getDefaultAgentModel(profile: string) {
     }
 }
 
-const agentProviderOptions = computed(() =>
-    getAgentModelGroups(selectedProfile.value || '').map(group => ({
-        label: group.label || group.provider,
-        value: group.provider,
-    }))
-)
-
-const agentModelOptions = computed(() => {
-    const group = getAgentModelGroups(selectedProfile.value || '')
-        .find(item => item.provider === selectedAgentProvider.value)
-    return (group?.models || []).map(modelId => ({
-        label: appStore.displayModelName(modelId, group?.provider),
-        value: modelId,
-    }))
-})
+const agentModelGroups = computed(() => getAgentModelGroups(selectedProfile.value || ''))
 
 const selectedAgentProviderGroup = computed(() =>
     getAgentModelGroups(selectedProfile.value || '')
         .find(item => item.provider === selectedAgentProvider.value)
 )
 
+const configuredAgentApiMode = computed(() => configuredProviderApiMode(selectedAgentProviderGroup.value, selectedAgentModel.value))
+watch([configuredAgentApiMode, selectedAgentApiMode], ([mode]) => {
+  if (mode && selectedAgentApiMode.value !== mode) selectedAgentApiMode.value = mode
+}, { flush: 'sync' })
 const agentApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -380,17 +381,24 @@ const pendingAgentPreset = computed(() =>
     agentPresets.value.find(preset => preset.id === pendingAgentPresetId.value) || null
 )
 
-const agentReasoningEffortOptions = computed(() => [
-    { label: t('chat.reasoningEffort.options.default'), value: '' },
-    { label: t('chat.reasoningEffort.options.none'), value: 'none' },
-    { label: t('chat.reasoningEffort.options.minimal'), value: 'minimal' },
-    { label: t('chat.reasoningEffort.options.low'), value: 'low' },
-    { label: t('chat.reasoningEffort.options.medium'), value: 'medium' },
-    { label: t('chat.reasoningEffort.options.high'), value: 'high' },
-    { label: t('chat.reasoningEffort.options.xhigh'), value: 'xhigh' },
-    { label: t('chat.reasoningEffort.options.max'), value: 'max' },
-])
+const agentReasoningEffortOptions = computed(() => reasoningOptions([
+    { label: t(selectedAgentType.value === 'hermes' ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'), value: '' },
+    ...modelReasoningEfforts(
+      getAgentModelGroups(selectedProfile.value || ''),
+      selectedAgentProvider.value,
+      selectedAgentModel.value,
+    ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
+], selectedAgentType.value === 'hermes'))
+const agentReasoningEffortValue = computed({
+  get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
+  set: (value: string) => { selectedAgentReasoningEffort.value = value },
+})
 
+watch([agentReasoningEffortOptions, selectedAgentReasoningEffort], ([options, effort]) => {
+  if (!usesGlobalAgentMode.value && effort && !options.some(option => option.value === effort)) {
+    selectedAgentReasoningEffort.value = ''
+  }
+})
 const summaryModelGroups = computed(() =>
     (appStore.profileModelGroups.find(entry => entry.profile === summaryConfig.value.summaryProfile)?.groups || [])
         .filter(group => group.provider !== 'moa' && canScopedCodingAgentUseProvider('ekko-agent', group.provider))
@@ -408,6 +416,10 @@ const summaryModelOptions = computed(() =>
         value: model,
     }))
 )
+const configuredSummaryApiMode = computed(() => configuredProviderApiMode(selectedSummaryProviderGroup.value, summaryConfig.value.summaryModel))
+watch([configuredSummaryApiMode, () => summaryConfig.value.summaryApiMode], ([mode]) => {
+  if (mode && summaryConfig.value.summaryApiMode !== mode) summaryConfig.value.summaryApiMode = mode
+}, { flush: 'sync' })
 const summaryApiModeOptions = computed(() => [
     { label: t('codingAgents.protocolOpenAiChat'), value: 'chat_completions' },
     { label: t('codingAgents.protocolOpenAiResponses'), value: 'codex_responses' },
@@ -517,7 +529,7 @@ const canConfirmAddAgent = computed(() =>
 function syncAgentApiMode() {
     const group = selectedAgentProviderGroup.value
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        group?.api_mode,
+        configuredAgentApiMode.value,
         inferCodingAgentApiMode(group?.provider || selectedAgentProvider.value, group?.base_url),
     )
 }
@@ -557,18 +569,15 @@ function handleAgentTypeChange(agent: GroupAgentType) {
 function handleAgentModeChange(mode: 'scoped' | 'global') {
     selectedAgentMode.value = mode
     selectedAgentPresetId.value = null
+    if (mode === 'scoped' && !selectedAgentProvider.value && selectedProfile.value) syncAgentModelSelection(selectedProfile.value)
 }
 
-function handleAgentProviderChange(provider: string) {
-    selectedAgentProvider.value = provider
-    selectedAgentModel.value = agentModelOptions.value[0]?.value || ''
+function handleAgentModelSelect(selection: { provider: string; model: string }) {
+    selectedAgentProvider.value = selection.provider
+    selectedAgentModel.value = selection.model
     selectedAgentReasoningEffort.value = ''
+    selectedAgentPresetId.value = null
     syncAgentApiMode()
-}
-
-function handleAgentModelChange(model: string) {
-    selectedAgentModel.value = model
-    selectedAgentReasoningEffort.value = ''
 }
 
 function agentAvatarName(agent: RoomAgent): string {
@@ -956,16 +965,6 @@ function handleGroupAttachmentPreviewRequest(event: Event): void {
     })
 }
 
-
-function acknowledgeGroupChatRefactorNotice() {
-    try {
-        window.localStorage.setItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY, '1')
-    } catch {
-        // The notice can still be dismissed when persistent browser storage is unavailable.
-    }
-    showGroupChatRefactorNotice.value = false
-}
-
 const remoteRooms = computed(() => buildRemoteGroupChatRooms(
     remoteRoomConnections.value,
 ))
@@ -1327,6 +1326,7 @@ async function handleSummaryConfigurationRequired() {
 }
 
 function resetAgentForm() {
+    nativeAgentSelections.value = {}
     selectedAgentPresetId.value = null
     selectedProfile.value = null
     selectedRuntimePreset.value = undefined
@@ -1353,10 +1353,11 @@ function currentAgentPresetInput(): GroupAgentPresetInput | null {
             provider: selectedAgentProvider.value,
             model: selectedAgentModel.value,
             usesGlobal: usesGlobalAgentMode.value,
+            nativeModel: nativeAgentSelection.value.model,
         }),
         profile: selectedProfile.value,
         apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-        reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
         agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
         name: agentName.value.trim() || selectedProfile.value,
         description: agentDescription.value.trim(),
@@ -1429,10 +1430,11 @@ function applyAgentPreset(presetId: string | null) {
     selectedAgentProvider.value = input.provider || ''
     selectedAgentModel.value = input.model || ''
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        input.apiMode,
+        configuredAgentApiMode.value || input.apiMode,
         inferCodingAgentApiMode(input.provider),
     )
-    selectedAgentReasoningEffort.value = input.reasoningEffort || ''
+    selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : input.reasoningEffort || ''
+    if (usesGlobalAgentMode.value) updateNativeAgentSelection({ model: input.model || '', reasoningEffort: input.reasoningEffort || '' })
     selectedRuntimePreset.value = input.agentPreset
     agentName.value = input.name || ''
     agentDescription.value = input.description || ''
@@ -1588,10 +1590,11 @@ function handleEditAgent(agent: RoomAgent) {
     selectedAgentProvider.value = agent.provider || ''
     selectedAgentModel.value = agent.model || ''
     selectedAgentApiMode.value = normalizeCodingAgentApiMode(
-        agent.apiMode,
+        configuredAgentApiMode.value || agent.apiMode,
         inferCodingAgentApiMode(agent.provider),
     )
-    selectedAgentReasoningEffort.value = agent.reasoningEffort || ''
+    selectedAgentReasoningEffort.value = usesGlobalAgentMode.value ? '' : agent.reasoningEffort || ''
+    if (usesGlobalAgentMode.value) updateNativeAgentSelection({ model: agent.model || '', reasoningEffort: agent.reasoningEffort || '' })
     selectedRuntimePreset.value = agent.agentPreset
     agentName.value = agent.name || ''
     agentDescription.value = agent.description || ''
@@ -1602,13 +1605,6 @@ function handleEditAgent(agent: RoomAgent) {
 
 onMounted(() => {
     if (!props.standalone) void refreshAgentAvailability()
-    if (!props.standalone) {
-        try {
-            showGroupChatRefactorNotice.value = window.localStorage.getItem(GROUP_CHAT_REFACTOR_NOTICE_STORAGE_KEY) !== '1'
-        } catch {
-            showGroupChatRefactorNotice.value = true
-        }
-    }
     window.addEventListener('hermes:preview-workspace-file', handleWorkspaceFilePreviewRequest)
     window.addEventListener('hermes:preview-group-attachment', handleGroupAttachmentPreviewRequest)
     window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest)
@@ -1741,10 +1737,11 @@ async function confirmAddAgent() {
                 provider: selectedAgentProvider.value,
                 model: selectedAgentModel.value,
                 usesGlobal: usesGlobalAgentMode.value,
+                nativeModel: nativeAgentSelection.value.model,
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -1780,10 +1777,11 @@ async function confirmUpdateAgent() {
                 provider: selectedAgentProvider.value,
                 model: selectedAgentModel.value,
                 usesGlobal: usesGlobalAgentMode.value,
+                nativeModel: nativeAgentSelection.value.model,
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -2134,6 +2132,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
         <!-- Room sidebar -->
         <PageSidebar>
         <div v-if="!props.standalone && showSidebar" class="room-sidebar">
+            <SidebarResizeHandle />
             <div class="sidebar-header">
                 <PageSidebarNav
                     active="group"
@@ -2257,7 +2256,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
         <!-- Main chat area -->
         <div
             class="chat-main"
-            :class="{ 'chat-main--sidebar-collapsed': !showSidebar }"
+            :class="{ 'chat-main--sidebar-collapsed': !showSidebar, 'chat-main--with-room': hasRoom }"
             @dragover="handleChatDragOver"
             @dragenter="handleChatDragEnter"
             @dragleave="handleChatDragLeave"
@@ -2489,6 +2488,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                         <GroupMessageList
                             :allow-speech="!props.standalone"
                             :can-manage-handoff="currentRoomCanManage"
+                            :allow-message-deletion="currentRoomCanManage"
                             @mention-agent="handleMentionAgent"
                             @continue-handoff="handleContinueHandoff"
                             @adjust-handoff-settings="handleOpenRoomSettings"
@@ -2819,7 +2819,8 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                 :closable="!isSavingAgent"
             >
                     <div v-if="isLoadingAgentForm" class="agent-form-loading" role="status">
-                        <NSpin size="small" :description="t('common.loading')" />
+                        <NSpin size="small" />
+                        <span>{{ t('common.loading') }}</span>
                     </div>
                     <div v-if="!editingAgent" class="agent-preset-entry">
                         <NButton secondary block @click="openAgentPresetSelection">
@@ -2887,7 +2888,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     <DshSessionPresetSelect v-if="selectedAgentType === 'dsh'" class="form-group"
                         v-model="selectedRuntimePreset" :disabled="isSavingAgent || isLoadingAgentForm"
                         @valid="selectedRuntimePresetReady = $event" />
-                    <div v-if="supportsGlobalAgentMode && selectedAgentType !== 'cursor'" class="form-group">
+                    <div v-if="supportsGlobalAgentMode && !isGlobalOnlyCodingAgent(selectedAgentType)" class="form-group">
                         <label class="form-label">{{ t('codingAgents.launchModeScope') }}</label>
                         <NSelect
                             :value="selectedAgentMode"
@@ -2896,31 +2897,20 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             @update:value="handleAgentModeChange"
                         />
                     </div>
-                    <div v-if="!usesGlobalAgentMode" class="form-group">
-                        <label class="form-label">{{ t('models.provider') }}</label>
-                        <NSelect
-                            :value="selectedAgentProvider"
-                            :options="agentProviderOptions"
-                            :placeholder="t('models.selectProvider')"
-                            :loading="isLoadingAgentForm"
-                            :disabled="isLoadingAgentForm"
-                            filterable
-                            @update:value="handleAgentProviderChange"
-                        />
+                    <div v-if="usesGlobalAgentMode" class="form-group">
+                        <label class="form-label">{{ t('models.models') }}</label>
+                        <NativeCodingAgentModelFields :key="nativeAgentId" :agent="nativeAgentId"
+                            :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
+                            :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                     </div>
                     <div v-if="!usesGlobalAgentMode" class="form-group">
                         <label class="form-label">{{ t('models.models') }}</label>
-                        <NSelect
-                            :value="selectedAgentModel"
-                            :options="agentModelOptions"
-                            :placeholder="t('models.selectModel')"
-                            :loading="isLoadingAgentForm"
-                            :disabled="isLoadingAgentForm || !selectedAgentProvider"
-                            filterable
-                            @update:value="handleAgentModelChange"
-                        />
+                        <ScopedModelSelector :provider="selectedAgentProvider" :model="selectedAgentModel"
+                            :groups="agentModelGroups" :allow-moa="selectedAgentType === 'hermes'"
+                            :disabled="isLoadingAgentForm || isSavingAgent"
+                            @select="handleAgentModelSelect" />
                     </div>
-                    <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode" class="form-group">
+                    <div v-if="selectedAgentType !== 'hermes' && !usesGlobalAgentMode && !configuredAgentApiMode" class="form-group">
                         <label class="form-label">{{ t('codingAgents.protocolScope') }}</label>
                         <NSelect
                             v-model:value="selectedAgentApiMode"
@@ -2928,11 +2918,16 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                             :disabled="isLoadingAgentForm"
                         />
                     </div>
-                    <div v-if="!usesGlobalAgentMode" class="form-group">
+                    <div class="form-group">
                         <label class="form-label">{{ t('chat.reasoningEffort.tooltip') }}</label>
+                        <NativeCodingAgentModelFields v-if="usesGlobalAgentMode" :key="nativeAgentId" :agent="nativeAgentId"
+                            field="reasoning-effort" :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
+                            :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                         <NSelect
-                            v-model:value="selectedAgentReasoningEffort"
+                            v-else
+                            v-model:value="agentReasoningEffortValue"
                             :options="agentReasoningEffortOptions"
+                            :aria-label="t('chat.reasoningEffort.tooltip')"
                             :placeholder="t('chat.reasoningEffort.tooltip')"
                             :disabled="isLoadingAgentForm"
                         />
@@ -3201,25 +3196,6 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                 </template>
             </NModal>
             <NModal
-                v-model:show="showGroupChatRefactorNotice"
-                v-if="!pageLoading"
-                preset="dialog"
-                :title="t('groupChat.refactorNoticeTitle')"
-                :mask-closable="false"
-                :close-on-esc="false"
-                :closable="false"
-                style="width: 480px; max-width: 92vw"
-            >
-                <p class="group-chat-refactor-notice">
-                    {{ t('groupChat.refactorNoticeMessage') }}
-                </p>
-                <template #action>
-                    <NButton type="primary" @click="acknowledgeGroupChatRefactorNotice">
-                        {{ t('common.confirm') }}
-                    </NButton>
-                </template>
-            </NModal>
-            <NModal
                 v-model:show="showWorkspaceModal"
                 preset="dialog"
                 :title="t('chat.setWorkspaceTitle')"
@@ -3441,7 +3417,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                                     :disabled="!summaryConfig.summaryProvider"
                                 />
                             </div>
-                            <div class="form-group">
+                            <div v-if="!configuredSummaryApiMode" class="form-group">
                                 <label class="form-label">{{ t('groupChat.summaryApiMode') }}</label>
                                 <NSelect v-model:value="summaryConfig.summaryApiMode" :options="summaryApiModeOptions" />
                             </div>
@@ -3568,7 +3544,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     position: relative;
     min-width: 0;
     max-width: 100%;
-    background-color: $bg-card;
+    background-color: var(--theme-card-bg, $bg-card);
 }
 
 .group-execution-queue-float-stack {
@@ -3589,11 +3565,6 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 1;
     min-height: 0;
     display: flex;
-}
-
-.group-chat-refactor-notice {
-    margin: 0;
-    line-height: 1.7;
 }
 
 @media (max-width: $breakpoint-mobile) {
@@ -3620,9 +3591,9 @@ export default defineComponent({ components: { CreateRoomForm } })
     bottom: 16px;
     z-index: 8;
     width: min(720px, calc(100% - 32px));
-    padding: 10px;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
-    border-radius: 16px;
+    padding: calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
+    border-radius: var(--radius-component, 16px);
     background: #ffffff;
     box-shadow: 0 14px 40px rgba(0, 0, 0, 0.14);
     backdrop-filter: blur(14px);
@@ -3635,12 +3606,12 @@ export default defineComponent({ components: { CreateRoomForm } })
 .approval-float-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 2px 4px 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: calc(2px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     color: var(--accent-primary);
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     font-weight: 700;
-    line-height: 1.2;
+    line-height: var(--line-height, 1.2);
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
@@ -3654,22 +3625,22 @@ export default defineComponent({ components: { CreateRoomForm } })
     justify-content: center;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.12);
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.24);
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.24);
 }
 
 .approval-float-title {
-    padding: 0 4px;
-    font-size: 14px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
+    font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     font-weight: 700;
-    line-height: 1.3;
+    line-height: var(--line-height, 1.3);
     color: $text-primary;
 }
 
 .approval-float-desc {
-    padding: 0 4px;
+    padding: 0 calc(4px * var(--spacing-scale, 1));
     margin-top: 5px;
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.45);
     color: $text-secondary;
 }
 
@@ -3681,13 +3652,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     white-space: pre-wrap;
     word-break: break-word;
     font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
-    font-size: 11px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    line-height: var(--line-height, 1.45);
     color: $text-primary;
     background: rgba(255, 255, 255, 0.68);
-    border: 1px solid $border-color;
-    border-radius: 11px;
-    padding: 8px 10px;
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 11px);
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
 
     .dark & {
         background: rgba(255, 255, 255, 0.08);
@@ -3698,19 +3669,19 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-start;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 10px;
-    padding: 10px 4px 0;
-    border-top: 1px solid $border-color;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
+    border-top: var(--border-width, 1px) solid $border-color;
 }
 
 .clarify-float-input-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 10px;
-    padding: 10px 4px 0;
-    border-top: 1px solid $border-color;
+    padding: calc(10px * var(--spacing-scale, 1)) calc(4px * var(--spacing-scale, 1)) 0;
+    border-top: var(--border-width, 1px) solid $border-color;
 }
 
 @media (max-width: 640px) {
@@ -3719,8 +3690,8 @@ export default defineComponent({ components: { CreateRoomForm } })
         right: 8px;
         bottom: 8px;
         width: auto;
-        padding: 7px;
-        border-radius: 14px;
+        padding: calc(7px * var(--spacing-scale, 1));
+        border-radius: var(--radius-component, 14px);
     }
 
     .approval-float-actions {
@@ -3747,12 +3718,13 @@ export default defineComponent({ components: { CreateRoomForm } })
 // ─── Room Sidebar ────────────────────────────────────────
 
 .room-sidebar {
+    position: relative;
     width: $sidebar-width;
     min-height: 0;
     align-self: stretch;
     margin: 0;
-    background: $bg-sidebar-surface;
-    border-inline-end: 1px solid $border-color;
+    background: var(--theme-sidebar-bg, $bg-sidebar-surface);
+    border-inline-end: var(--border-width, 1px) solid $border-color;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -3760,7 +3732,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .sidebar-header {
-    padding: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
     flex-shrink: 0;
 }
 
@@ -3775,8 +3747,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 8px;
-    padding: 7px 10px;
+    gap: calc(8px * var(--spacing-scale, 1));
+    padding: calc(7px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     cursor: pointer;
     transition:
         background-color $transition-fast,
@@ -3791,8 +3763,8 @@ export default defineComponent({ components: { CreateRoomForm } })
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 13px;
-        line-height: 18px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+        line-height: var(--line-height, calc(var(--font-size-base, 14px) * 18 / 14));
     }
 
     &:hover {
@@ -3805,9 +3777,9 @@ export default defineComponent({ components: { CreateRoomForm } })
 .conversation-switch {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 2px;
+    gap: calc(2px * var(--spacing-scale, 1));
     margin: 0 12px 8px;
-    padding: 2px;
+    padding: calc(2px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     background: rgba(var(--accent-primary-rgb), 0.05);
     flex-shrink: 0;
@@ -3817,11 +3789,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     height: 28px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-component, 5px);
     background: transparent;
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 16px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, calc(var(--font-size-base, 14px) * 16 / 14));
     cursor: pointer;
     transition:
         background-color $transition-fast,
@@ -3832,7 +3804,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     &.active {
-        background: $bg-card;
+        background: var(--theme-card-bg, $bg-card);
         color: $text-primary;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
     }
@@ -3841,16 +3813,16 @@ export default defineComponent({ components: { CreateRoomForm } })
 .manual-room-link-hint {
     margin: 0 0 12px;
     color: var(--text-secondary);
-    line-height: 1.6;
+    line-height: var(--line-height, 1.6);
 }
 
 .manual-room-link-input {
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    padding: 9px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
+    padding: calc(9px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid var(--border-color);
+    border-radius: var(--radius-component, 6px);
     outline: none;
     background: var(--bg-secondary);
     color: var(--text-primary);
@@ -3865,7 +3837,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .room-list {
     flex: 1;
     overflow-y: auto;
-    padding: 0 8px 8px;
+    padding: 0 calc(8px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
 }
 
 .room-section + .room-section {
@@ -3878,11 +3850,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     justify-content: space-between;
     box-sizing: border-box;
     width: 100%;
-    padding: 4px 10px 6px;
+    padding: calc(4px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
     border: 0;
     background: transparent;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-align: start;
@@ -3905,8 +3877,8 @@ export default defineComponent({ components: { CreateRoomForm } })
 .room-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
+    padding: calc(10px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     cursor: pointer;
     transition: background-color $transition-fast;
@@ -3936,7 +3908,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     .room-name {
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         color: $text-primary;
         white-space: nowrap;
         overflow: hidden;
@@ -3944,13 +3916,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     .room-code {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
-        font-family: $font-code;
+        font-family: var(--font-code, $font-code);
     }
 
     .room-tokens {
-        font-size: 11px;
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         color: $text-muted;
     }
 
@@ -4001,8 +3973,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     .room-origin {
         overflow: hidden;
         color: $text-muted;
-        font-family: $font-code;
-        font-size: 11px;
+        font-family: var(--font-code, $font-code);
+        font-size: calc(var(--font-size-base, 14px) * 11 / 14);
         text-overflow: ellipsis;
         white-space: nowrap;
     }
@@ -4011,7 +3983,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .remote-room-state {
     flex-shrink: 0;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
     &.online {
         color: $success;
@@ -4019,9 +3991,9 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .empty-rooms {
-    padding: 20px 12px;
+    padding: calc(20px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
     text-align: center;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     color: $text-muted;
 }
 
@@ -4034,14 +4006,20 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     margin: 10px 10px 10px 0;
     overflow: hidden;
-    background-color: $bg-main-surface;
-    border: 1px solid $border-color;
-    border-radius: 14px;
+    background-color: var(--theme-content-bg, $bg-main-surface);
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 14px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
     position: relative;
 
     &--sidebar-collapsed {
         margin-inline-start: 10px;
+    }
+
+    // The member rail and conversation paint their own regional surfaces.
+    // Do not tint the sidebar rail with another content background beneath it.
+    &--with-room {
+        background-color: transparent;
     }
 }
 
@@ -4062,11 +4040,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     align-items: center;
     width: 72px;
     min-height: 0;
-    padding: 12px 0;
+    padding: calc(12px * var(--spacing-scale, 1)) 0;
     overflow: hidden;
     box-sizing: border-box;
-    border-inline-end: 1px solid $border-color;
-    background: rgba(var(--bg-main-surface-rgb), 0.55);
+    border-inline-end: var(--border-width, 1px) solid $border-color;
+    background: var(--theme-sidebar-bg, $bg-sidebar-surface);
 }
 
 .agent-avatar-rail-trigger {
@@ -4076,7 +4054,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 1;
     width: 100%;
     min-height: 0;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     overflow-x: hidden;
     overflow-y: auto;
     scrollbar-width: none;
@@ -4097,7 +4075,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     padding: 0;
     overflow: visible;
     box-sizing: border-box;
-    border: 1px solid rgba(var(--text-primary-rgb), 0.12);
+    border: var(--border-width, 1px) solid rgba(var(--text-primary-rgb), 0.12);
     border-radius: 50%;
     background: $bg-secondary;
     cursor: pointer;
@@ -4126,7 +4104,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .agent-avatar-rail-agent .agent-avatar {
     box-sizing: border-box;
-    border: 1px solid #fff;
+    border: var(--border-width, 1px) solid #fff;
 }
 
 .agent-owner-avatar-badge {
@@ -4143,7 +4121,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     box-sizing: border-box;
     border: 2px solid $bg-main-surface;
     border-radius: 50%;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
     pointer-events: none;
 }
@@ -4174,14 +4152,14 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-avatar-activity-popover {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     max-width: 280px;
 }
 
 .agent-avatar-activity-text {
     color: $text-secondary;
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.4);
 }
 
 .agent-avatar-stop {
@@ -4189,16 +4167,16 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    gap: 5px;
+    gap: calc(5px * var(--spacing-scale, 1));
     height: 26px;
-    padding: 0 9px;
-    border: 1px solid rgba(var(--error-rgb), 0.24);
+    padding: 0 calc(9px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--error-rgb), 0.24);
     border-radius: $radius-sm;
     color: $error;
     background: rgba(var(--error-rgb), 0.08);
     cursor: pointer;
-    font-size: 12px;
-    line-height: 1;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1);
     transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
 
     &:hover {
@@ -4304,7 +4282,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     height: 34px;
     margin-top: 10px;
     padding: 0;
-    border: 1px dashed rgba(var(--accent-primary-rgb), 0.65);
+    border: var(--border-width, 1px) dashed rgba(var(--accent-primary-rgb), 0.65);
     border-radius: 50%;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.08);
@@ -4325,7 +4303,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     display: flex;
     flex-direction: column;
-    background-color: $bg-main-surface;
+    background-color: var(--theme-content-bg, $bg-main-surface);
     animation: group-chat-surface-fade-in 1.5s ease both;
 }
 
@@ -4333,17 +4311,17 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: center;
     align-self: flex-start;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     width: 520px;
     max-width: calc(100% - 40px);
     min-width: 0;
     box-sizing: border-box;
     margin: 0 20px;
-    padding: 3px 8px;
+    padding: calc(3px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: $text-secondary;
     background: rgba(0, 0, 0, 0.03);
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
     &.is-success {
         color: #52c41a;
@@ -4358,7 +4336,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex: 0 1 auto;
     min-width: 0;
     color: $text-secondary;
-    font-family: $font-code;
+    font-family: var(--font-code, $font-code);
     white-space: nowrap;
 }
 
@@ -4410,8 +4388,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-height: 0;
     overflow: visible;
     display: flex;
-    background: $bg-card;
-    border-inline-start: 1px solid $border-color;
+    background: var(--theme-card-bg, $bg-card);
+    border-inline-start: var(--border-width, 1px) solid $border-color;
 }
 
 .tool-panel-enter-active,
@@ -4463,8 +4441,8 @@ export default defineComponent({ components: { CreateRoomForm } })
         width: 12px;
         height: 38px;
         transform: translateY(-50%);
-        border-radius: 6px;
-        border: 1px solid $border-color;
+        border-radius: var(--radius-component, 6px);
+        border: var(--border-width, 1px) solid $border-color;
         background:
             linear-gradient($text-muted, $text-muted) center 12px / 6px 1px no-repeat,
             linear-gradient($text-muted, $text-muted) center 19px / 6px 1px no-repeat,
@@ -4489,7 +4467,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
 }
 
 .group-tool-tabs {
@@ -4500,10 +4478,10 @@ export default defineComponent({ components: { CreateRoomForm } })
     order: 2;
     width: 48px;
     height: 100%;
-    gap: 4px;
-    padding: 8px 6px;
-    border-inline-start: 1px solid $border-color;
-    background: $bg-sidebar-surface;
+    gap: calc(4px * var(--spacing-scale, 1));
+    padding: calc(8px * var(--spacing-scale, 1)) calc(6px * var(--spacing-scale, 1));
+    border-inline-start: var(--border-width, 1px) solid $border-color;
+    background: var(--theme-sidebar-bg, $bg-sidebar-surface);
     box-sizing: border-box;
 }
 
@@ -4559,7 +4537,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
 
     > * {
         height: 100%;
@@ -4572,11 +4550,11 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    padding: 24px;
+    gap: calc(12px * var(--spacing-scale, 1));
+    padding: calc(24px * var(--spacing-scale, 1));
     color: $text-muted;
     text-align: center;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
 
     > svg {
         color: $text-secondary;
@@ -4645,16 +4623,16 @@ export default defineComponent({ components: { CreateRoomForm } })
     z-index: 30;
     pointer-events: none;
     border: 2px dashed var(--accent-info);
-    border-radius: 8px;
+    border-radius: var(--radius-component, 8px);
     background: rgba(var(--accent-info-rgb), 0.05);
 }
 
 .chat-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 21px 20px;
-    border-bottom: 1px solid $border-color;
+    gap: calc(12px * var(--spacing-scale, 1));
+    padding: calc(21px * var(--spacing-scale, 1)) calc(20px * var(--spacing-scale, 1));
+    border-bottom: var(--border-width, 1px) solid $border-color;
 
     .icon-btn {
         width: 28px;
@@ -4668,14 +4646,14 @@ export default defineComponent({ components: { CreateRoomForm } })
     .header-left {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: calc(8px * var(--spacing-scale, 1));
         overflow: hidden;
         flex: 1;
         min-width: 0;
     }
 
     .room-title-text {
-        font-size: 16px;
+        font-size: calc(var(--font-size-base, 14px) * 16 / 14);
         font-weight: 600;
         color: $text-primary;
         white-space: nowrap;
@@ -4687,20 +4665,20 @@ export default defineComponent({ components: { CreateRoomForm } })
     .header-info {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: calc(8px * var(--spacing-scale, 1));
         flex-shrink: 0;
     }
 
     .member-count {
-        font-size: 12px;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
         color: $text-muted;
     }
 
     .member-count-toggle {
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        padding: 3px 5px;
+        gap: calc(3px * var(--spacing-scale, 1));
+        padding: calc(3px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
         border: 0;
         border-radius: $radius-sm;
         background: transparent;
@@ -4744,7 +4722,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
+    gap: calc(16px * var(--spacing-scale, 1));
     color: $text-muted;
 
     .no-room-icon {
@@ -4752,7 +4730,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     p {
-        font-size: 14px;
+        font-size: calc(var(--font-size-base, 14px) * 14 / 14);
     }
 }
 
@@ -4788,9 +4766,9 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .modal {
-    background: $bg-card;
+    background: var(--theme-card-bg, $bg-card);
     border-radius: $radius-lg;
-    padding: 24px;
+    padding: calc(24px * var(--spacing-scale, 1));
     width: 400px;
     max-width: 90vw;
     max-height: calc(100vh - 32px);
@@ -4799,14 +4777,26 @@ export default defineComponent({ components: { CreateRoomForm } })
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
 
     h3 {
-        font-size: 16px;
+        font-size: calc(var(--font-size-base, 14px) * 16 / 14);
         font-weight: 600;
         color: $text-primary;
         margin: 0 0 20px;
     }
 }
 
-.agent-form-loading,
+.agent-form-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(10px * var(--spacing-scale, 1));
+    padding: calc(12px * var(--spacing-scale, 1));
+    margin-bottom: 18px;
+    border-radius: $radius-md;
+    background: rgba(var(--text-primary-rgb), 0.03);
+    color: $text-secondary;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
+}
+
 .agent-preset-entry {
     margin-bottom: 18px;
 }
@@ -4818,7 +4808,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-preset-dialog-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     max-height: 320px;
     margin-top: 12px;
     overflow-y: auto;
@@ -4828,13 +4818,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 3px;
+    gap: calc(3px * var(--spacing-scale, 1));
     width: 100%;
-    padding: 11px 12px;
-    border: 1px solid $border-color;
+    padding: calc(11px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
     color: $text-primary;
-    background: $bg-main-surface;
+    background: var(--theme-content-bg, $bg-main-surface);
     text-align: start;
     cursor: pointer;
     transition:
@@ -4858,14 +4848,14 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .agent-preset-dialog-row-name {
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 600;
 }
 
 .agent-preset-dialog-row-config,
 .agent-preset-dialog-row-error {
-    font-size: 11px;
-    line-height: 1.45;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
+    line-height: var(--line-height, 1.45);
     overflow-wrap: anywhere;
 }
 
@@ -4881,10 +4871,10 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     margin-top: 12px;
-    padding: 28px 16px;
-    border: 1px dashed $border-color;
+    padding: calc(28px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) dashed $border-color;
     border-radius: $radius-md;
     color: $text-muted;
     text-align: center;
@@ -4897,7 +4887,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-preset-management-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     margin-top: 14px;
 }
 
@@ -4910,24 +4900,24 @@ export default defineComponent({ components: { CreateRoomForm } })
 
     h4 {
         margin: 0 0 12px;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         font-weight: 600;
         color: $text-primary;
     }
 }
 
 .pending-agent-pairings-section {
-    padding: 12px;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.3);
-    border-radius: 12px;
+    padding: calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.3);
+    border-radius: var(--radius-component, 12px);
     background: rgba(var(--accent-primary-rgb), 0.06);
 }
 
 .pending-agent-pairing-card {
-    padding: 10px;
-    border: 1px solid $border-color;
-    border-radius: 10px;
-    background: $bg-main-surface;
+    padding: calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
+    border-radius: var(--radius-component, 10px);
+    background: var(--theme-content-bg, $bg-main-surface);
 
     & + & {
         margin-top: 10px;
@@ -4940,8 +4930,8 @@ export default defineComponent({ components: { CreateRoomForm } })
     p {
         margin: 6px 0 10px;
         color: $text-secondary;
-        font-size: 12px;
-        line-height: 1.5;
+        font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+        line-height: var(--line-height, 1.5);
         overflow-wrap: anywhere;
     }
 }
@@ -4949,19 +4939,19 @@ export default defineComponent({ components: { CreateRoomForm } })
 .agent-pairing-header-button {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
     min-height: 30px;
-    padding: 0 9px;
-    border: 1px solid rgba(var(--accent-primary-rgb), 0.32);
+    padding: 0 calc(9px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid rgba(var(--accent-primary-rgb), 0.32);
     border-radius: 999px;
     color: var(--accent-primary);
     background: rgba(var(--accent-primary-rgb), 0.08);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     cursor: pointer;
 
     strong {
         min-width: 18px;
-        padding: 1px 5px;
+        padding: calc(1px * var(--spacing-scale, 1)) calc(5px * var(--spacing-scale, 1));
         border-radius: 999px;
         color: #fff;
         background: var(--accent-primary);
@@ -4981,12 +4971,12 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 18px;
+    gap: calc(18px * var(--spacing-scale, 1));
     margin-bottom: 14px;
 
     strong {
         color: $text-primary;
-        font-size: 13px;
+        font-size: calc(var(--font-size-base, 14px) * 13 / 14);
         font-weight: 600;
     }
 
@@ -5003,7 +4993,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: calc(12px * var(--spacing-scale, 1));
 
     h4 {
         margin-bottom: 0;
@@ -5012,18 +5002,18 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .summary-config-required {
     margin: 0 0 10px;
-    padding: 8px 10px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: #d97706;
     background: rgba(217, 119, 6, 0.1);
-    font-size: 12px;
-    line-height: 1.5;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
+    line-height: var(--line-height, 1.5);
 }
 
 .summary-status {
-    padding: 3px 8px;
+    padding: calc(3px * var(--spacing-scale, 1)) calc(8px * var(--spacing-scale, 1));
     border-radius: 999px;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     background: rgba(var(--text-primary-rgb), 0.06);
 
@@ -5046,15 +5036,15 @@ export default defineComponent({ components: { CreateRoomForm } })
 .summary-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 14px;
+    gap: calc(6px * var(--spacing-scale, 1)) calc(14px * var(--spacing-scale, 1));
     margin: 10px 0;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 
     > span {
         display: inline-flex;
         align-items: baseline;
-        gap: 4px;
+        gap: calc(4px * var(--spacing-scale, 1));
     }
 
     strong {
@@ -5069,11 +5059,11 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .summary-error {
     margin-bottom: 12px;
-    padding: 8px 10px;
+    padding: calc(8px * var(--spacing-scale, 1)) calc(10px * var(--spacing-scale, 1));
     border-radius: $radius-sm;
     color: #d03050;
     background: rgba(208, 48, 80, 0.08);
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
     overflow-wrap: anywhere;
 }
 
@@ -5081,13 +5071,13 @@ export default defineComponent({ components: { CreateRoomForm } })
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 10px;
+    gap: calc(10px * var(--spacing-scale, 1));
     margin-bottom: 14px;
-    padding: 10px;
-    border: 1px solid $border-color;
+    padding: calc(10px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-sm;
     color: $text-secondary;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
 
     strong,
     span {
@@ -5110,7 +5100,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .summary-loading {
-    padding: 20px 0;
+    padding: calc(20px * var(--spacing-scale, 1)) 0;
     color: $text-muted;
     text-align: center;
 }
@@ -5122,10 +5112,10 @@ export default defineComponent({ components: { CreateRoomForm } })
 .group-agent-avatar-editor {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: calc(14px * var(--spacing-scale, 1));
     margin-bottom: 18px;
-    padding: 12px;
-    border: 1px solid $border-color;
+    padding: calc(12px * var(--spacing-scale, 1));
+    border: var(--border-width, 1px) solid $border-color;
     border-radius: $radius-md;
     background: rgba(var(--text-primary-rgb), 0.02);
 }
@@ -5142,14 +5132,14 @@ export default defineComponent({ components: { CreateRoomForm } })
 .group-agent-avatar-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: calc(6px * var(--spacing-scale, 1));
 }
 
 .group-agent-avatar-hint {
     display: block;
     margin-top: 6px;
     color: $text-muted;
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
 }
 
 .group-agent-avatar-file {
@@ -5158,7 +5148,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .form-label {
     display: block;
-    font-size: 13px;
+    font-size: calc(var(--font-size-base, 14px) * 13 / 14);
     font-weight: 500;
     color: $text-secondary;
     margin-bottom: 6px;
@@ -5166,7 +5156,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 
 .code-row {
     display: flex;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
     align-items: center;
 }
 
@@ -5178,14 +5168,14 @@ export default defineComponent({ components: { CreateRoomForm } })
     margin-top: 12px;
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
 }
 
 .agent-drawer-actions {
     display: flex;
     width: 100%;
     justify-content: flex-end;
-    gap: 8px;
+    gap: calc(8px * var(--spacing-scale, 1));
 
     &.is-editing {
         justify-content: space-between;
@@ -5193,7 +5183,7 @@ export default defineComponent({ components: { CreateRoomForm } })
 }
 
 .form-hint {
-    font-size: 11px;
+    font-size: calc(var(--font-size-base, 14px) * 11 / 14);
     color: $text-muted;
     margin: 4px 0 0;
 }
@@ -5247,7 +5237,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     }
 
     .chat-header {
-        padding: 16px 12px 16px 52px;
+        padding: calc(16px * var(--spacing-scale, 1)) calc(12px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1)) 52px;
     }
 
     .group-summary-inline-status {
@@ -5258,7 +5248,7 @@ export default defineComponent({ components: { CreateRoomForm } })
     .agent-avatar-rail {
         flex-basis: 68px;
         width: 68px;
-        padding: 10px 0;
+        padding: calc(10px * var(--spacing-scale, 1)) 0;
     }
 
     .agent-avatar-rail-item {
@@ -5289,8 +5279,8 @@ export default defineComponent({ components: { CreateRoomForm } })
 </style>
 
 <style scoped lang="scss">
-.summary-review { margin: 12px 0; padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; display: grid; gap: 6px; }
+.summary-review { margin: 12px 0; padding: calc(12px * var(--spacing-scale, 1)); border: var(--border-width, 1px) solid var(--border-color); border-radius: var(--radius-component, 8px); display: grid; gap: calc(6px * var(--spacing-scale, 1)); }
 .summary-review.is-pass { border-color: #18a058; }
 .summary-review.is-needs_improvement { border-color: #f0a020; }
-.summary-review ul { margin: 0; padding-inline-start: 20px; }
+.summary-review ul { margin: 0; padding-inline-start: calc(20px * var(--spacing-scale, 1)); }
 </style>

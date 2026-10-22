@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useTheme } from '@/composables/useTheme'
+import { editorTheme } from '@/styles/theme-integrations'
 import { NButton, NSpace, useMessage, useDialog } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useFilesStore } from '@/stores/hermes/files'
 import FileTreeToggle from './FileTreeToggle.vue'
-// Monaco is ~1MB minified; load it lazily on first editor mount instead of
-// pulling it into the entry graph of every chat page load.
-import type * as MonacoNS from 'monaco-editor'
-
-let monaco: typeof MonacoNS | null = null
+import * as monaco from 'monaco-editor'
 
 // Configure Monaco workers using import.meta.url
 ;(self as any).MonacoEnvironment = {
@@ -37,16 +35,26 @@ const emit = defineEmits<{
 }>()
 
 const editorContainer = ref<HTMLElement | null>(null)
-const editorRef = ref<MonacoNS.editor.IStandaloneCodeEditor | null>(null)
+let editor: monaco.editor.IStandaloneCodeEditor | null = null
 const saving = ref(false)
+const { isDark, customization } = useTheme()
 
-onMounted(async () => {
+function syncEditorTheme() {
+  if (!editor) return
+  monaco.editor.defineTheme('studio', editorTheme(customization.value, isDark.value))
+  monaco.editor.setTheme('studio')
+  editor.updateOptions({
+    fontSize: customization.value.fontSize * 13 / 14,
+    lineHeight: customization.value.appearance?.global.lineHeight ?? 0,
+    letterSpacing: customization.value.appearance?.global.letterSpacing ?? 0,
+  })
+}
+watch([isDark, customization], syncEditorTheme)
+
+onMounted(() => {
   if (!editorContainer.value || !filesStore.editingFile) return
 
-  monaco = await import('monaco-editor')
-  if (!editorContainer.value || !filesStore.editingFile) return
-
-  const instance = monaco.editor.create(editorContainer.value, {
+  editor = monaco.editor.create(editorContainer.value, {
     value: filesStore.editingFile.content,
     language: filesStore.editingFile.language,
     theme: document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs',
@@ -69,23 +77,23 @@ onMounted(async () => {
       horizontalScrollbarSize: 0,
     },
   })
-  editorRef.value = instance
 
-  instance.onDidChangeModelContent(() => {
+  syncEditorTheme()
+  editor.onDidChangeModelContent(() => {
     if (filesStore.editingFile) {
-      filesStore.editingFile.content = instance.getValue()
+      filesStore.editingFile.content = editor!.getValue()
     }
   })
 
   // Ctrl/Cmd + S to save
-  instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
     handleSave()
   })
 })
 
 onBeforeUnmount(() => {
-  editorRef.value?.dispose()
-  editorRef.value = null
+  editor?.dispose()
+  editor = null
 })
 
 async function handleSave() {
@@ -163,20 +171,20 @@ function handleClose() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  border-bottom: 1px solid $border-color;
-  background-color: $bg-card;
+  padding: calc(8px * var(--spacing-scale, 1)) calc(16px * var(--spacing-scale, 1));
+  border-bottom: var(--border-width, 1px) solid $border-color;
+  background-color: var(--theme-card-bg, $bg-card);
 }
 
 .editor-file-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: calc(8px * var(--spacing-scale, 1));
   min-width: 0;
 }
 
 .editor-filename {
-  font-size: 13px;
+  font-size: calc(var(--font-size-base, 14px) * 13 / 14);
   color: $text-secondary;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -185,7 +193,7 @@ function handleClose() {
 
   @media (max-width: $breakpoint-mobile) {
     max-width: 120px;
-    font-size: 12px;
+    font-size: calc(var(--font-size-base, 14px) * 12 / 14);
   }
 }
 

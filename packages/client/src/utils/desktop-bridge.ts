@@ -81,6 +81,8 @@ export interface DesktopBrowserSelection {
 }
 
 export interface DesktopBrowserBridge {
+  setRemoteControl?: (enable: boolean) => Promise<boolean>
+  remoteRequest?: (body: Record<string, unknown>) => Promise<unknown>
   getState: () => Promise<DesktopBrowserState>
   setViewport: (bounds: DesktopWindowBounds, visible: boolean) => Promise<DesktopBrowserState>
   createTab: (url?: string, activate?: boolean) => Promise<DesktopBrowserTab>
@@ -138,7 +140,72 @@ export interface DesktopUpdaterBridge {
   onStateChange: (callback: (state: DesktopUpdateState) => void) => () => void
 }
 
+export interface DesktopScreenshotShortcutState {
+  accelerator: string
+  hideWindows: boolean
+  registered: boolean
+  error: '' | 'invalid' | 'conflict' | 'saveFailed' | 'hideUnavailable'
+}
+
+export interface DesktopScreenshotShortcutBridge {
+  getState: () => Promise<DesktopScreenshotShortcutState>
+  save: (config: { accelerator: string; hideWindows: boolean }) => Promise<DesktopScreenshotShortcutState>
+  setTarget: (targetId: string, active: boolean | null) => Promise<boolean>
+  setEditing: (targetId: string, editing: boolean) => Promise<DesktopScreenshotShortcutState>
+  onTrigger: (callback: (request: { targetId: string; hideWindows: boolean }) => void) => () => void
+  onStateChange: (callback: (state: DesktopScreenshotShortcutState) => void) => () => void
+}
+
+export type DesktopComputerUsePermission = 'accessibility' | 'screenRecording'
+export type DesktopComputerUsePermissionStatus = 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown'
+export type DesktopComputerUsePermissions = { supported: false } | {
+  supported: true
+  accessibility: DesktopComputerUsePermissionStatus
+  screenRecording: DesktopComputerUsePermissionStatus
+}
+
+export interface DesktopRemoteDevice {
+  id: string
+  name: string
+  serverUrl: string
+}
+
+export interface DesktopRemoteDevicesState {
+  devices: DesktopRemoteDevice[]
+  activeDeviceId: string | null
+  activeServerUrl: string | null
+}
+
+export interface DesktopRemoteDevicesBridge {
+  list: () => Promise<DesktopRemoteDevicesState>
+  add: (input: { name: string; serverUrl: string }) => Promise<DesktopRemoteDevicesState>
+  remove: (id: string) => Promise<DesktopRemoteDevicesState>
+  switchTo: (id: string | null) => Promise<void>
+  returnLocal: () => Promise<void>
+}
+
 export interface HermesDesktopBridge {
+  remoteDevices?: DesktopRemoteDevicesBridge
+  computerUsePermissions?: {
+    claimReminder?: () => Promise<DesktopComputerUsePermissions | null>
+    getStatus: () => Promise<DesktopComputerUsePermissions>
+    request: (permission: DesktopComputerUsePermission) => Promise<void>
+  }
+  messageContextMenu?: {
+    show: (request: { label: string; enabled: boolean; hasSelection: boolean }) => Promise<'select-messages' | null>
+    close: () => Promise<void>
+  }
+  screenshot?: {
+    shortcut?: DesktopScreenshotShortcutBridge
+    getCapabilities?: () => Promise<{
+      capture: 'electron' | 'portal-screenshot' | 'unavailable'
+      presentation: 'desktop-overlay' | 'image-editor'
+      hideWindows: boolean
+      regionSelection: 'studio' | 'system-or-studio'
+    }>
+    captureRegion: (request: { requestId: string; hideWindows?: boolean; labels: { hint: string; confirm: string; cancel: string; reset: string; tools?: Record<string, string> } }) => Promise<{ dataUrl: string; width: number; height: number } | null>
+    cancel: (requestId: string) => Promise<boolean>
+  }
   updater?: DesktopUpdaterBridge
   getToken: () => Promise<string>
   ensureAuth?: () => Promise<boolean>
@@ -158,6 +225,7 @@ export interface HermesDesktopBridge {
   browser?: DesktopBrowserBridge
   platform: string
   isDesktop: boolean
+  remoteMode?: boolean
   windowKind?: 'main' | 'pet' | 'chat'
 }
 

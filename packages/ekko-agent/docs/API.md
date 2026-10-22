@@ -324,6 +324,8 @@ API mode 固定映射：`chat_completions` → `openai-chat`，`codex_responses`
 
 记忆增强的具体行为、开关及降级规则见 [memory-jev.md](memory-jev.md)。每次 `runtime.run` 固定 JEV 配置快照；本轮工具和召回沿用此快照，下一轮才使用更新后的值。
 
+Computer Use 的独立可选评估使用 `jev.computerUseMatchEnabled` / `jev.computerUseVerifyEnabled`（默认关闭）。在 `computer_use` 的 `get_window_state` 调用中传顶层 `target` / `expectation`，可从新鲜窗口证据获得已有元素 token 推荐或结果判断；不会自动点击、重试或改变原生结果。候选上限、最低置信度、超时与 Studio 映射见 [computer-use.md](computer-use.md#optional-jev-assessments)。
+
 JEV 实现由 Ekko 自己提供，可以脱离 Studio 独立使用。配置按字段合并，优先级从低到高为：
 
 1. `DEFAULT_EKKO_JEV_CONFIG`：默认关闭，空密钥、`https://api.typesafe.ai`、`jev-latest`、10 秒超时。
@@ -409,7 +411,7 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 
 | 路径 | 类型 | 说明 |
 | --- | --- | --- |
-| `schemaVersion` | `number` | 当前为 14；读取旧配置时补齐新字段。 |
+| `schemaVersion` | `number` | 当前为 15；读取旧配置时补齐新字段。 |
 | `runtime.maxSteps` | `number` | 单次主循环最大步数。 |
 | `runtime.maxModelRetries` | `number` | 单次模型步骤最大重试。 |
 | `runtime.toolFailureRecoveryThreshold` | `number` | 同一工具连续失败后要求模型纠错或换方案的阈值；默认 3，不终止运行。 |
@@ -438,7 +440,7 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 | `jev.skillsMinConfidence` | `number` | 补充匹配或跳过学习复盘的最低置信度，默认 0.8，范围 0.5–1。 |
 | `jev.skillsTimeoutMs` | `number` | 单次技能判断总预算，默认 3000，范围 100–30000 毫秒。 |
 | `jev.apiKey` | `string` | 独立运行时可保存的本地密钥，默认空；运行参数可临时覆盖。 |
-| `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`，不带 `/v1`。 |
+| `jev.baseUrl` | `string` | API 根地址，默认 `https://api.typesafe.ai`；也接受末尾带 `/v1` 或 `/v1/systemone` 的地址，自动规范化并保留网关前缀。 |
 | `jev.model` | `string` | 默认 `jev-latest`。 |
 | `jev.timeoutMs` | `number` | 默认 10000，范围 1000–120000 毫秒。 |
 | `model.providerCatalog` | `Record<string, EkkoModelProviderPreset>` | 可安装目录。 |
@@ -447,6 +449,8 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 | `model.authorizations` | `Record<string, EkkoModelAuthorizationSettings>` | OAuth 状态。 |
 | `tools.enabled` | `boolean` | 全部工具源总开关。 |
 | `tools.executionTimeoutMs` | `number` | 普通工具超时。 |
+| `tools.computerUse.enabled` | `boolean` | 桌面操作工具开关；默认开启，调用时才启动驱动。 |
+| `tools.computerUse.timeoutMs` | `number` | 内置 Cua SDK 每次操作超时，默认 30000 毫秒；SDK 随 Agent 安装，无需外部驱动路径。详见 [Computer Use](computer-use.md)。 |
 | `tools.approvals.enabled` | `boolean` | 危险工具审批开关。 |
 | `tools.approvals.timeoutMs` | `number` | 审批等待时间。 |
 | `tools.approvals.permanentAllow` | `string[]` | 持久允许键。 |
@@ -478,6 +482,8 @@ Studio 的 `ekkoSkillsEnabled` 映射到此字段；共用参数为 `skillsCandi
 | `prompt.instructions` | `string[]` | 注入 runtime 的全局指令。 |
 
 `EkkoModelProviderSettings` 字段：可选 `label`；必填 `type` 和 `defaultModel`；可选 `apiMode`、`requestStyle`、`openAIChatReasoningReplayFormat`、`baseUrl`、`endpointPath`、`models`、`authType`、`source`、`apiKey`、`headers`、`timeoutMs`、`capabilities`。`capabilities` 可覆盖 `streaming`、`tools`、`vision`、`jsonMode`、`systemPrompt`、`maxInputTokens`。
+
+Responses 客户端会为原生推理历史记录 `reasoning.native.replayScope`，按实际请求的 Provider、模型和接口地址绑定来源。只有来源相同时才重放这些原生项；切换目标或读取缺少来源的旧记录时，只跳过请求中的原生推理项，保留正文、工具调用和结果，且不改写已存历史。标记使用摘要，不保存接口地址或密钥，也不会发送给 Provider。Chat Completions 的 `reasoning_content`、Anthropic thinking 和 Coding Agent 代理保持各自原有处理。
 
 `EkkoMcpServerConfig` 支持两种传输：stdio 使用 `command`，可选 `args` 和字符串 `env`；远程服务使用 `type: "streamable_http"`、`url` 和可选字符串 `headers`。`enabled` 控制是否加载。两种传输均使用官方 MCP Client；新 runtime 自动读取所选 Profile 的配置，显式 run-level `toolContext.mcpServers` 仍可覆盖它。
 
@@ -799,7 +805,7 @@ export function normalizeEkkoConfig(value: unknown): EkkoConfig
 ### `src/config.ts`
 
 ```ts
-export const EKKO_CONFIG_SCHEMA_VERSION = 14
+export const EKKO_CONFIG_SCHEMA_VERSION = 15
 
 export const EKKO_CONFIG_DIRECTORY_NAME = 'config'
 
@@ -924,11 +930,17 @@ export interface EkkoCodeExecConfig {
   maxSourceBytes: number
 }
 
+export interface EkkoComputerUseConfig {
+  enabled: boolean
+  timeoutMs: number
+}
+
 export interface EkkoToolsConfig {
   enabled: boolean
   executionTimeoutMs: number
   approvals: EkkoToolApprovalConfig
   codeExec: EkkoCodeExecConfig
+  computerUse: EkkoComputerUseConfig
 }
 
 export interface EkkoMcpServerConfig {
@@ -1004,9 +1016,9 @@ export interface EkkoConfig {
   prompt: EkkoPromptConfig
 }
 
-export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> jev?: Partial<EkkoJevConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
+export type EkkoConfigPatch = { schemaVersion?: number runtime?: Partial<EkkoRuntimeConfig> model?: Partial<Omit<EkkoModelConfig, 'providerCatalog' | 'disabledProviderPresets' | 'providers' | 'authorizations'>> & { providerCatalog?: Record<string, EkkoModelProviderPreset> disabledProviderPresets?: string[] providers?: Record<string, EkkoModelProviderSettings> authorizations?: Record<string, EkkoModelAuthorizationSettings> } tools?: Partial<Omit<EkkoToolsConfig, 'approvals' | 'codeExec' | 'computerUse'>> & { approvals?: Partial<EkkoToolApprovalConfig> codeExec?: Partial<EkkoCodeExecConfig> computerUse?: Partial<EkkoComputerUseConfig> } mcp?: Partial<Omit<EkkoMcpConfig, 'profiles'>> & { profiles?: Record<string, EkkoMcpProfileConfig> } delegation?: Partial<EkkoDelegationConfig> compression?: Partial<EkkoCompressionConfig> memory?: Partial<EkkoMemoryConfig> jev?: Partial<EkkoJevConfig> skills?: Partial<Omit<EkkoSkillsConfig, 'profiles'>> & { profiles?: Record<string, Partial<EkkoSkillsProfileConfig>> } logging?: Partial<EkkoLoggingConfig> prompt?: Partial<EkkoPromptConfig> }
 
-export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, jev: { ...DEFAULT_EKKO_JEV_CONFIG }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
+export const DEFAULT_EKKO_CONFIG: EkkoConfig = { schemaVersion: EKKO_CONFIG_SCHEMA_VERSION, runtime: { maxSteps: DEFAULT_AGENT_MAX_STEPS, maxModelRetries: DEFAULT_AGENT_MODEL_MAX_RETRIES, toolFailureRecoveryThreshold: DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD, maxConsecutiveToolFailures: DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES, }, model: { defaultProvider: '', defaultModel: '', requestTimeoutMs: DEFAULT_MODEL_REQUEST_TIMEOUT_MS, reasoningEffort: 'medium', reasoningSummary: 'auto', authorizationRefreshLeewayMs: DEFAULT_MODEL_AUTHORIZATION_REFRESH_LEEWAY_MS, providerCatalog: structuredClone(BUILTIN_MODEL_PROVIDER_PRESETS), disabledProviderPresets: [], providers: {}, authorizations: {}, }, tools: { enabled: true, executionTimeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, computerUse: { enabled: true, timeoutMs: 30_000 }, approvals: { enabled: true, timeoutMs: DEFAULT_TOOL_APPROVAL_TIMEOUT_MS, permanentAllow: [], }, codeExec: { enabled: true, languages: [...DEFAULT_CODE_EXEC_LANGUAGES], timeoutMs: DEFAULT_TOOL_EXECUTION_TIMEOUT_MS, maxToolCalls: DEFAULT_CODE_EXEC_MAX_TOOL_CALLS, maxOutputBytes: DEFAULT_CODE_EXEC_MAX_OUTPUT_BYTES, maxStderrBytes: DEFAULT_CODE_EXEC_MAX_STDERR_BYTES, maxSourceBytes: DEFAULT_CODE_EXEC_MAX_SOURCE_BYTES, }, }, mcp: { enabled: true, profiles: {}, }, delegation: { backgroundEnabled: true, subtaskMaxSteps: DEFAULT_AGENT_SUBTASK_MAX_STEPS, }, compression: { enabled: true, threshold: DEFAULT_COMPRESSION_THRESHOLD, targetRatio: DEFAULT_COMPRESSION_TARGET_RATIO, protectLastN: DEFAULT_COMPRESSION_PROTECT_LAST_N, protectFirstN: DEFAULT_COMPRESSION_PROTECT_FIRST_N, }, memory: { enabled: true, recentMessageLimit: DEFAULT_MEMORY_RECENT_MESSAGE_LIMIT, automaticRecallTokenBudget: DEFAULT_AUTOMATIC_MEMORY_TOKEN_BUDGET, searchResultLimit: DEFAULT_MEMORY_SEARCH_RESULT_LIMIT, }, skills: { enabled: true, reviewEveryToolCalls: DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL, profiles: {}, }, jev: { ...DEFAULT_EKKO_JEV_CONFIG }, logging: { maxBytes: DEFAULT_EKKO_LOG_MAX_BYTES, }, prompt: { instructions: [], }, }
 
 export function serializeDefaultEkkoConfig(): string
 ```
@@ -1443,6 +1455,8 @@ export * from './skills/types'
 
 export * from './tools/browser'
 
+export * from './tools/computer-use'
+
 export * from './tools/approval'
 
 export * from './tools/clarify'
@@ -1539,6 +1553,13 @@ export interface EkkoJevConfig {
   memoryMinConfidence: number
   memoryFilterMinConfidence: number
   memoryTimeoutMs: number
+  computerUseMatchEnabled: boolean
+  computerUseMatchCandidateLimit: number
+  computerUseMatchMinConfidence: number
+  computerUseMatchTimeoutMs: number
+  computerUseVerifyEnabled: boolean
+  computerUseVerifyMinConfidence: number
+  computerUseVerifyTimeoutMs: number
   skillsEnabled: boolean
   skillsCandidateLimit: number
   skillsMinConfidence: number
@@ -1551,7 +1572,7 @@ export interface EkkoJevConfig {
 
 export type EkkoJevOverrides = Partial<EkkoJevConfig> | false
 
-export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryFilterMinConfidence: 0.8, memoryTimeoutMs: 3000, skillsEnabled: false, skillsCandidateLimit: 20, skillsMinConfidence: 0.8, skillsTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
+export const DEFAULT_EKKO_JEV_CONFIG: Readonly<EkkoJevConfig> = Object.freeze({ enabled: false, memoryEnabled: false, memoryKindRoutingEnabled: false, memoryRelevanceFilterEnabled: false, memoryRerankEnabled: false, memoryWriteReviewEnabled: false, memoryCandidateLimit: 20, memoryRecallMinConfidence: 0.5, memoryMinConfidence: 0.8, memoryFilterMinConfidence: 0.8, memoryTimeoutMs: 3000, computerUseMatchEnabled: false, computerUseMatchCandidateLimit: 20, computerUseMatchMinConfidence: 0.8, computerUseMatchTimeoutMs: 3000, computerUseVerifyEnabled: false, computerUseVerifyMinConfidence: 0.8, computerUseVerifyTimeoutMs: 3000, skillsEnabled: false, skillsCandidateLimit: 20, skillsMinConfidence: 0.8, skillsTimeoutMs: 3000, apiKey: '', baseUrl: 'https://api.typesafe.ai', model: 'jev-latest', timeoutMs: 10_000, })
 
 export function resolveEkkoJevConfig( ...layers: Array<EkkoJevOverrides | undefined> ): EkkoJevConfig
 ```
@@ -2582,7 +2603,7 @@ export class OpenAIResponsesModelClient implements ModelClient {
 
 export function toOpenAIResponsesPayload(config: ModelProviderConfig, request: ModelRequest): OpenAIResponsesPayload
 
-export function normalizeOpenAIResponsesResponse(response: OpenAIResponsesResponse): ModelResponse
+export function normalizeOpenAIResponsesResponse(response: OpenAIResponsesResponse, replayScope?: string): ModelResponse
 ```
 ### `src/model/providers/prompt-completion.ts`
 
@@ -2632,6 +2653,7 @@ export type AgentMessageRole = 'system' | 'user' | 'assistant' | 'tool'
 export type AgentReasoningFormat = | 'openai-reasoning-details' | 'openai-responses-items' | 'anthropic-thinking-blocks' | 'gemini-content-parts'
 
 export interface AgentReasoningNative {
+  replayScope?: string
   format: AgentReasoningFormat
   data: unknown
 }
@@ -3287,6 +3309,58 @@ export class CodeExecTool implements AgentTool<CodeExecInput> {
   async execute(input: CodeExecInput, context: AgentToolContext = {}): Promise<AgentToolResult>
 }
 ```
+### `src/tools/computer-use/driver.ts`
+
+```ts
+export class ComputerUseDriverSession {
+  readonly id = `ekko-${randomUUID()}`
+  readonly described = new Set<string>()
+  constructor(private readonly timeoutMs: number)
+  async list(signal?: AbortSignal): Promise<any[]>
+  async call(name: string, args: Record<string, unknown>, signal?: AbortSignal)
+  async close(): Promise<void>
+}
+```
+### `src/tools/computer-use/index.ts`
+
+```ts
+export interface ComputerUseToolOptions {
+  enabled?: boolean
+  timeoutMs?: number
+}
+
+export class ComputerUseTool implements AgentTool {
+  readonly concurrency = 'serial' as const
+  readonly definition: AgentTool['definition']
+  constructor(private readonly options: ComputerUseToolOptions = {})
+  async execute(input: Record<string, unknown>, context: AgentToolContext = {}): Promise<AgentToolResult>
+}
+```
+### `src/tools/computer-use/jev.ts`
+
+```ts
+export type ComputerUseJevAssessment = Record<string, unknown>
+
+export function computerUseJevEnabled(feature: Feature): boolean
+
+export async function assessComputerUse( feature: Feature, intent: string, input: unknown, args: Record<string, unknown>, signal?: AbortSignal, ): Promise<ComputerUseJevAssessment>
+```
+### `src/tools/computer-use/policy.ts`
+
+```ts
+export const COMPUTER_USE_READ_TOOLS = new Set([ 'list_apps', 'list_windows', 'get_window_state', 'get_desktop_state', 'get_accessibility_tree', 'get_screen_size', 'get_cursor_position', 'verify_state', 'zoom', 'check_permissions', 'health_report', ])
+
+export const COMPUTER_USE_INPUT_TOOLS = new Set([ 'click', 'double_click', 'right_click', 'drag', 'scroll', 'type_text', 'press_key', 'hotkey', 'set_value', 'invoke_menu', 'launch_app', 'bring_to_front', 'set_window_frame', 'move_cursor', ])
+
+export function computerUseApproval(input: Record<string, unknown>)
+
+export function record(value: unknown): Record<string, any>
+```
+### `src/tools/computer-use/sdk.ts`
+
+```ts
+export async function loadComputerUseSdk(): Promise<CuaSdk>
+```
 ### `src/tools/delegation.ts`
 
 ```ts
@@ -3302,6 +3376,15 @@ export class DelegateTaskTool implements AgentTool<DelegateTaskInput> {
 }
 
 export function createDelegationTools(): AgentTool[]
+```
+### `src/tools/directory.ts`
+
+```ts
+export function isWindowsDriveRoot(target: string): boolean
+
+export function normalizeDirectoryTarget(target: string): string
+
+export async function ensureDirectory(target: string): Promise<string>
 ```
 ### `src/tools/files.ts`
 
@@ -3456,6 +3539,7 @@ export interface DefaultToolRegistryOptions {
   executionTimeoutMs?: number
   codeExec?: (CodeExecToolOptions & { enabled?: boolean }) | false
   recovery?: EkkoRecoveryService
+  computerUse?: ComputerUseToolOptions
 }
 
 export function createDefaultToolRegistry(options: DefaultToolRegistryOptions = {}): AgentToolRegistry
@@ -3658,6 +3742,7 @@ export interface AgentToolContext {
   browserSessionId?: string
   mcpServers?: Record<string, unknown>
   mcpSessionSignal?: AbortSignal
+  computerUseSessionSignal?: AbortSignal
   timeoutMs?: number
   signal?: AbortSignal
   requestToolApproval?: AgentToolApprovalRequester

@@ -57,4 +57,4 @@ packages/client/src/**/*.js
 .hermes/
 # Local npm release tarballs
 /release/npm/
-.ekko/
+/release/tos/

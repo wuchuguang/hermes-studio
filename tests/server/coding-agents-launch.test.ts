@@ -35,11 +35,11 @@ import { configureProfileConfig } from '../../packages/server/src/modules/studio
 import * as providerRuntime from '../../packages/server/src/modules/studio/public/provider-runtime'
 import { upsertCodingAgentMcpServer } from '../../packages/server/src/modules/coding-agents/services/mcp-manager'
 import { getCodingAgentManagedMcpServerConfigs } from '../../packages/server/src/modules/coding-agents/services'
-import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/native/zcode-command'
+import { resolveZcodeCommand } from '../../packages/server/src/modules/coding-agents/services/zcode/installation'
 
 // Keep launch fixtures independent of desktop applications installed on the host.
 // Actual ZCode desktop command resolution is covered by zcode-desktop-command.
-vi.mock('../../packages/server/src/modules/coding-agents/services/native/zcode-command', () => ({
+vi.mock('../../packages/server/src/modules/coding-agents/services/zcode/installation', () => ({
   resolveZcodeCommand: vi.fn(async (args: string[]) => ({ command: 'zcode', args, env: {}, path: 'zcode' })),
 }))
 
@@ -166,7 +166,7 @@ it.each(['claude-code', 'codex', 'pi', 'grok', 'opencode', 'dsh'])('binds %s man
       else if (agent === 'opencode') servers = JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT).mcp
       else servers = JSON.parse(readFileSync(join(launch.rootDir, 'mcp.json'), 'utf8')).mcpServers
       const managed = Object.entries(servers).filter(([name]) => name.startsWith('ekko-studio-'))
-      expect(managed).toHaveLength(5)
+      expect(managed).toHaveLength(4)
       for (const [, config] of managed) {
         const env = config.env || config.environment
         expect(env.HERMES_WEB_UI_RUN_TOKEN_FILE).toBe(expectedFile)
@@ -950,7 +950,7 @@ describe('coding agent launch preparation', () => {
     expect(runtimeMcp.mcpServers.user_docs).toEqual({ url: 'https://docs.example.com/mcp' })
     expect(runtimeMcp.mcpServers['ekko-studio-api']).toMatchObject({ directTools: false, lifecycle: 'lazy' })
     expect(runtimeMcp.mcpServers['ekko-studio-browser']).toMatchObject({ directTools: false, lifecycle: 'lazy' })
-    expect(runtimeMcp.mcpServers['ekko-studio-devices']).toMatchObject({ directTools: false, lifecycle: 'lazy' })
+    expect(runtimeMcp.mcpServers['ekko-studio-devices']).toBeUndefined()
     expect(runtimeMcp.mcpServers['ekko-studio-use']).toMatchObject({ directTools: false, lifecycle: 'lazy' })
     expect(runtimeMcp.mcpServers['ekko-studio-interaction']).toMatchObject({ directTools: true, lifecycle: 'eager', toolPrefix: 'server' })
     const runtimeModels = JSON.parse(readFileSync(join(result.rootDir, 'models.json'), 'utf-8'))
@@ -1302,7 +1302,7 @@ describe('coding agent launch preparation', () => {
       const servers = agent === 'codex' ? runtime.mcp_servers : runtime.mcpServers
       expect(servers['user.tools']).toEqual(external)
       expect(servers['hermes-studio']).toBeUndefined()
-      for (const toolset of ['api', 'browser', 'devices', 'use', 'interaction']) {
+      for (const toolset of ['api', 'browser', 'use', 'interaction']) {
         expect(servers[`ekko-studio-${toolset}`]).toMatchObject({ env: { ELECTRON_RUN_AS_NODE: '1' } })
       }
       if (agent === 'codex') {
@@ -1355,8 +1355,8 @@ describe('coding agent launch preparation', () => {
       workspaceDir,
       command: 'claude',
       args,
-      env: {},
-      shellCommand: shellCommandFor(workspaceDir, 'claude', args),
+      env: { IS_SANDBOX: '1' },
+      shellCommand: shellCommandFor(workspaceDir, 'claude', args, { IS_SANDBOX: '1' }),
       files: [{
         key: 'prompt',
         path: 'hermes-rules.md',
@@ -1370,8 +1370,8 @@ describe('coding agent launch preparation', () => {
     expect(existsSync(join(home, 'global-home', '.claude', 'hermes-rules.md'))).toBe(false)
   })
 
-  it('uses Claude Code auto permission mode instead of dangerous bypass when running as root', async () => {
-    mockProcessUid(0)
+  it.each([0, 1000])('uses sandbox permission bypass for global Claude Code with uid %s', async (uid) => {
+    mockProcessUid(uid)
     const home = makeHome()
 
     const result = await prepareCodingAgentLaunch('claude-code', {
@@ -1382,14 +1382,11 @@ describe('coding agent launch preparation', () => {
     const rootDir = join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code')
     const workspaceDir = join(home, 'coding-agent', 'workspace', 'default', 'global')
     const promptPath = join(rootDir, 'hermes-rules.md')
-    const usesUnixRootPermissions = process.platform !== 'win32'
     const args = [
       '--append-system-prompt-file',
       promptPath,
       '--mcp-config', join(rootDir, 'mcp.json'),
-      ...(usesUnixRootPermissions
-        ? ['--permission-mode', 'auto', '--allowedTools', 'mcp__ekko-studio-interaction__ekko_studio_update_plan']
-        : ['--dangerously-skip-permissions']),
+      '--dangerously-skip-permissions',
     ]
 
     expect(result).toMatchObject({
@@ -1398,7 +1395,8 @@ describe('coding agent launch preparation', () => {
       rootDir,
       command: 'claude',
       args,
-      shellCommand: shellCommandFor(workspaceDir, 'claude', args),
+      env: { IS_SANDBOX: '1' },
+      shellCommand: shellCommandFor(workspaceDir, 'claude', args, { IS_SANDBOX: '1' }),
     })
   })
 
@@ -1444,6 +1442,38 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(join(globalCodexHome, 'config.toml'), 'utf8')).toBe('model = "gpt-global"\n')
     expect(readFileSync(join(globalCodexHome, 'auth.json'), 'utf8')).toBe('{"token":"user-token"}\n')
     expect(readFileSync(join(globalCodexHome, 'AGENTS.md'), 'utf8')).toBe('User global Codex instructions.\n')
+  })
+
+  it.each(['codex', 'claude-code', 'grok', 'pi', 'cursor', 'opencode', 'antigravity'])('passes a global %s native model override without Studio provider configuration', async id => {
+    const home = makeHome()
+    if (id === 'pi') {
+      const adapter = join(home, 'coding-agent', 'pi-mcp-adapter', 'node_modules', 'pi-mcp-adapter', 'index.ts')
+      mkdirSync(dirname(adapter), { recursive: true })
+      writeFileSync(adapter, 'export default function () {}')
+    }
+    const result = await prepareCodingAgentLaunch(id, { mode: 'global', model: 'native-selected',
+      ...(['codex', 'claude-code', 'grok', 'pi', 'antigravity'].includes(id) ? { reasoningEffort: 'high' } : {}),
+      ...(id === 'pi' ? { piOutputMode: 'rpc' as const } : {}),
+    })
+    expect(result.model).toBe('native-selected')
+    expect(result.provider).toBe('global')
+    expect(result.args).toEqual(expect.arrayContaining(['--model', 'native-selected']))
+    if (id === 'codex') expect(result.args).toContain('model_reasoning_effort="high"')
+    if (id === 'claude-code' || id === 'antigravity') expect(result.args).toEqual(expect.arrayContaining(['--effort', 'high']))
+    if (id === 'grok') expect(result.args).toEqual(expect.arrayContaining(['--reasoning-effort', 'high']))
+    if (['codex', 'claude-code', 'grok', 'pi', 'antigravity'].includes(id)) expect(result.reasoningEffort).toBe('high')
+  })
+
+  it.each([
+    ['cursor', 'gpt-5.3-codex-xhigh-fast', 'xhigh'],
+    ['antigravity', 'gemini-3.1-pro-low', 'low'],
+  ])('launches %s with the exact selected effort-variant ID', async (id, model, reasoningEffort) => {
+    makeHome()
+    const result = await prepareCodingAgentLaunch(id, { mode: 'global', model, reasoningEffort })
+    expect(result).toMatchObject({ model, reasoningEffort, provider: 'global' })
+    expect(result.args).toEqual(expect.arrayContaining(['--model', model]))
+    expect(result.args).not.toContain('--effort')
+    await expect(prepareCodingAgentLaunch(id, { mode: 'global', model, reasoningEffort: 'high' })).rejects.toThrow('same variant')
   })
 
   it('launches Grok from an isolated shadow home without changing the user config', async () => {
@@ -1622,6 +1652,47 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(join(baseRoot, 'skills', 'workflow-skill', 'SKILL.md'), 'utf8')).toBe('# Workflow skill\n')
     expect(existsSync(launcherFile(baseRoot))).toBe(true)
     expect(existsSync(join(result.rootDir, 'skills'))).toBe(false)
+  })
+
+  it.each(['codex_responses', 'chat_completions'] as const)('forwards scoped OpenCode effort to the %s upstream', async apiMode => {
+    makeHome()
+    const launch = await prepareCodingAgentLaunch('opencode', {
+      mode: 'scoped', profile: 'default', provider: 'test', model: 'test-model',
+      baseUrl: 'https://api.example.com/v1', apiKey: 'sk-upstream', apiMode,
+      reasoningEffort: 'xhigh', sessionId: 'opencode-effort', agentSessionId: 'opencode-effort-run',
+    })
+    const config = JSON.parse(launch.env.OPENCODE_CONFIG_CONTENT)
+    const routeKey = config.provider['hermes-studio'].options.baseURL.match(/\/api\/codex-proxy\/([^/]+)\/v1/)[1]
+    const response = { id: 'resp_effort', object: 'response', status: 'completed', output: [],
+      usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } }
+    const chat = { id: 'chat_effort', choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }] }
+
+    for (const stream of [false, true]) {
+      const payload = apiMode === 'codex_responses'
+        ? `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`
+        : 'data: {"id":"chat_effort","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+      const fetchMock = vi.fn<typeof fetch>(async () => stream
+        ? new Response(payload, { headers: { 'Content-Type': 'text/event-stream' } })
+        : Response.json(apiMode === 'codex_responses' ? response : chat))
+      vi.stubGlobal('fetch', fetchMock)
+      // OpenCode's custom provider can omit reasoning despite Studio's selection.
+      const ctx = makeProxyContext(routeKey, launch.env.HERMES_OPENCODE_API_KEY, { input: 'hello', stream })
+      await codexProxyResponses(ctx)
+      expect(ctx.status).toBeUndefined()
+      if (stream) for await (const _chunk of ctx.body) { /* consume the proxy stream */ }
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const sent = JSON.parse(String(fetchMock.mock.calls[0][1]!.body))
+      expect(sent).toMatchObject({ model: 'test-model', stream })
+      if (apiMode === 'codex_responses') {
+        expect(sent.reasoning).toEqual({ effort: 'xhigh' })
+        expect(sent).not.toHaveProperty('reasoning_effort')
+      } else {
+        expect(sent.reasoning_effort).toBe('xhigh')
+        expect(sent).not.toHaveProperty('reasoning')
+      }
+      expect(ctx.request.body).not.toHaveProperty('reasoning')
+    }
   })
 
   it.each([{ input: ['text'] }, { input: ['text', 'image'] }])('allows OpenCode images regardless of model metadata $input', async ({ input }) => {
@@ -1832,7 +1903,7 @@ describe('coding agent launch preparation', () => {
         HERMES_WEB_UI_MANAGED_MCP: '1',
       },
     })
-    for (const name of ['ekko-studio-api', 'ekko-studio-browser', 'ekko-studio-devices', 'ekko-studio-use', 'ekko-studio-interaction']) {
+    for (const name of ['ekko-studio-api', 'ekko-studio-browser', 'ekko-studio-use', 'ekko-studio-interaction']) {
       expect(mcp.mcpServers[name].env.ELECTRON_RUN_AS_NODE).toBe('1')
     }
     expect(mcp.mcpServers['ekko-studio-browser']).toMatchObject({
@@ -1843,14 +1914,7 @@ describe('coding agent launch preparation', () => {
         HERMES_MCP_TOOLSET: 'browser',
       },
     })
-    expect(mcp.mcpServers['ekko-studio-devices']).toMatchObject({
-      command: process.execPath,
-      args: [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'devices'],
-      env: {
-        HERMES_MCP_SERVER_NAME: 'ekko-studio-devices',
-        HERMES_MCP_TOOLSET: 'devices',
-      },
-    })
+    expect(mcp.mcpServers['ekko-studio-devices']).toBeUndefined()
     expect(mcp.mcpServers['ekko-studio-use']).toMatchObject({
       command: process.execPath,
       args: [join(process.cwd(), 'bin/ekko-studio-mcp.mjs'), 'use'],
@@ -1887,7 +1951,7 @@ describe('coding agent launch preparation', () => {
         HERMES_MCP_TOOLSET: 'api',
       },
     })
-    expect(mcp.mcpServers['ekko-studio-devices'].command).toBe('/runtime/node')
+    expect(mcp.mcpServers['ekko-studio-devices']).toBeUndefined()
     expect(mcp.mcpServers['ekko-studio-browser'].command).toBe('/runtime/node')
     expect(mcp.mcpServers['ekko-studio-use'].command).toBe('/runtime/node')
   })
@@ -1926,7 +1990,7 @@ describe('coding agent launch preparation', () => {
     expect(claudeMcp.mcpServers.custom).toEqual({ command: 'custom-mcp' })
     expect(claudeMcp.mcpServers['ekko-studio-api']).toBeDefined()
     expect(claudeMcp.mcpServers['ekko-studio-browser']).toBeDefined()
-    expect(claudeMcp.mcpServers['ekko-studio-devices']).toBeDefined()
+    expect(claudeMcp.mcpServers['ekko-studio-devices']).toBeUndefined()
     expect(claudeMcp.mcpServers['ekko-studio-use']).toBeDefined()
 
     const codexRoot = join(home, 'coding-agent', 'model', 'default', 'openrouter', 'codex')
@@ -1952,7 +2016,7 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).not.toContain('[mcp_servers.hermes-web-ui-mcp]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-api]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-browser]')
-    expect(codexConfig).toContain('[mcp_servers.ekko-studio-devices]')
+    expect(codexConfig).not.toContain('[mcp_servers.ekko-studio-devices]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-use]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-interaction]')
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-interaction\][\s\S]*?tool_timeout_sec = 360/)
@@ -2083,7 +2147,7 @@ describe('coding agent launch preparation', () => {
     expect(codexConfig).not.toContain('[model_providers.unrelated]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-api]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-browser]')
-    expect(codexConfig).toContain('[mcp_servers.ekko-studio-devices]')
+    expect(codexConfig).not.toContain('[mcp_servers.ekko-studio-devices]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-use]')
     expect(codexConfig).toContain('[mcp_servers.ekko-studio-interaction]')
     expect(codexConfig).toMatch(/\[mcp_servers.ekko-studio-interaction\][\s\S]*?tool_timeout_sec = 360/)
@@ -2237,9 +2301,14 @@ describe('coding agent launch preparation', () => {
     ))).toBe(false)
   })
 
-  it('uses Claude Code auto permission mode for scoped root launches', async () => {
-    mockProcessUid(0)
+  it.each([0, 1000])('uses sandbox permission bypass for scoped Claude Code with uid %s', async (uid) => {
+    mockProcessUid(uid)
     const home = makeHome()
+    vi.stubEnv('IS_SANDBOX', '0')
+    const globalSettingsPath = join(home, 'global-home', '.claude', 'settings.json')
+    mkdirSync(dirname(globalSettingsPath), { recursive: true })
+    const globalSettings = JSON.stringify({ env: { IS_SANDBOX: '0' } })
+    writeFileSync(globalSettingsPath, globalSettings)
 
     const result = await prepareCodingAgentLaunch('claude-code', {
       profile: 'default',
@@ -2250,9 +2319,7 @@ describe('coding agent launch preparation', () => {
       isolateSettings: true,
     })
 
-    const permissionArgs = process.platform === 'win32'
-      ? ['--dangerously-skip-permissions']
-      : ['--permission-mode', 'auto', '--allowedTools', 'mcp__ekko-studio-interaction__ekko_studio_update_plan']
+    const permissionArgs = ['--dangerously-skip-permissions']
     expect(result.args).toEqual([
       '--settings',
       join(result.rootDir, 'settings.json'),
@@ -2265,13 +2332,14 @@ describe('coding agent launch preparation', () => {
       ...permissionArgs,
     ])
     const launcher = readFileSync(launcherFile(result.rootDir), 'utf-8')
-    if (process.platform === 'win32') {
-      expectLauncherFragment(launcher, '--dangerously-skip-permissions')
-    } else {
-      expectLauncherFragment(launcher, '--permission-mode auto')
-      expectLauncherFragment(launcher, '--allowedTools mcp__ekko-studio-interaction__ekko_studio_update_plan')
-      expect(launcher).not.toContain('--dangerously-skip-permissions')
-    }
+    expectLauncherFragment(launcher, '--dangerously-skip-permissions')
+    expect(launcher).not.toContain('--permission-mode')
+    expect(launcher).not.toContain('--allowedTools')
+    expect(result.env.IS_SANDBOX).toBe('1')
+    const settings = JSON.parse(readFileSync(join(result.rootDir, 'settings.json'), 'utf-8'))
+    expect(settings.env.IS_SANDBOX).toBe('1')
+    expect(readFileSync(globalSettingsPath, 'utf-8')).toBe(globalSettings)
+    expect(launcher).toContain(process.platform === 'win32' ? "$env:IS_SANDBOX = '1'" : 'export IS_SANDBOX=1')
     expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'openrouter', 'claude-code'))
   })
 
@@ -2397,21 +2465,21 @@ describe('coding agent launch preparation', () => {
     expect(config).toContain('Browser MCP exposes a compact toolset rather than resources')
     expect(config).toContain('# 输出格式规范')
     expect(config).toContain('[mcp_servers.ekko-studio-api]')
-    expect(config).toContain('[mcp_servers.ekko-studio-devices]')
+    expect(config).not.toContain('[mcp_servers.ekko-studio-devices]')
     expect(config).toContain('[mcp_servers.ekko-studio-use]')
     expect(config).toContain(`command = ${JSON.stringify(process.execPath)}`)
     expect(config).toContain(`args = [${JSON.stringify(join(process.cwd(), 'bin/ekko-studio-mcp.mjs'))}, "api"]`)
-    expect(config).toContain(`args = [${JSON.stringify(join(process.cwd(), 'bin/ekko-studio-mcp.mjs'))}, "devices"]`)
+    expect(config).not.toContain(`args = [${JSON.stringify(join(process.cwd(), 'bin/ekko-studio-mcp.mjs'))}, "devices"]`)
     expect(config).toContain(`args = [${JSON.stringify(join(process.cwd(), 'bin/ekko-studio-mcp.mjs'))}, "use"]`)
     expect(config).toContain('ELECTRON_RUN_AS_NODE = "1"')
     expect(config).toContain(`HERMES_WEB_UI_URL = "http://127.0.0.1:8648", HERMES_WEB_UI_HOME = ${JSON.stringify(home)}`)
     expect(config).toContain('HERMES_WEBUI_STATE_DIR = "')
     expect(config).toContain('HERMES_WEB_UI_PROFILE = "default"')
     expect(config).toContain('HERMES_MCP_SERVER_NAME = "ekko-studio-api"')
-    expect(config).toContain('HERMES_MCP_SERVER_NAME = "ekko-studio-devices"')
+    expect(config).not.toContain('HERMES_MCP_SERVER_NAME = "ekko-studio-devices"')
     expect(config).toContain('HERMES_MCP_SERVER_NAME = "ekko-studio-use"')
     expect(config).toContain('HERMES_MCP_TOOLSET = "api"')
-    expect(config).toContain('HERMES_MCP_TOOLSET = "devices"')
+    expect(config).not.toContain('HERMES_MCP_TOOLSET = "devices"')
     expect(config).toContain('HERMES_MCP_TOOLSET = "use"')
     expect(config).toContain('HERMES_WEB_UI_MANAGED_MCP = "1"')
 
@@ -3119,7 +3187,7 @@ describe('coding agent launch preparation', () => {
     expect(sse).toContain('"text":"pong"')
     expect(sse).toContain('event: response.output_item.done')
     expect(sse).toContain('"output":[{"type":"message"')
-    expect(sse).not.toContain('"usage"')
+    expect(sse).toContain('"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":15}')
   })
 
   it('keeps OpenCode response.completed valid when Chat Completions omits usage', async () => {
@@ -3227,6 +3295,9 @@ describe('coding agent launch preparation', () => {
 
   it('streams Anthropic thinking and text as Pi-compatible Responses events', async () => {
     makeHome()
+    vi.spyOn(providerRuntime, 'getModelRuntimeCapabilities').mockReturnValue({
+      contextWindow: 200_000, outputLimit: 64_000, outputLimitKnown: true, reasoning: true, input: ['text'],
+    })
     const launch = await prepareCodingAgentLaunch('codex', {
       profile: 'default',
       provider: 'anthropic-compatible',
@@ -3241,7 +3312,7 @@ describe('coding agent launch preparation', () => {
     const encoder = new TextEncoder()
     const fetchMock = vi.fn(async () => new Response(new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","usage":{"input_tokens":3,"output_tokens":0}}}\n\n'))
+        controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","usage":{"input_tokens":3,"cache_read_input_tokens":90000,"cache_creation_input_tokens":500,"output_tokens":0}}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"inspect"}}\n\n'))
         controller.enqueue(encoder.encode('event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}\n\n'))
@@ -3277,7 +3348,112 @@ describe('coding agent launch preparation', () => {
     expect(sse).toContain('event: response.output_text.done')
     expect(sse).toContain('"text":"hello"')
     expect(sse).toContain('event: response.completed')
-    expect(sse).not.toContain('"usage"')
+    // Codex drives auto-compaction from this usage; Anthropic excludes cached
+    // prompt tokens from input_tokens, so they must be added back.
+    expect(sse).toContain('"usage":{"input_tokens":90503,"input_tokens_details":{"cached_tokens":90000},"output_tokens":2,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":90505}')
+    expect(sse).not.toContain('cache_read_input_tokens')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).max_tokens).toBe(64_000)
+  })
+
+  it('falls back to max_tokens 4096 when an Anthropic model has no output metadata', async () => {
+    vi.spyOn(providerRuntime, 'getModelRuntimeCapabilities').mockReturnValue({
+      contextWindow: 200_000, outputLimit: 32_000, outputLimitKnown: false, reasoning: true, input: ['text'],
+    })
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'custom-anthropic',
+      model: 'custom-claude',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'anthropic_messages',
+    })
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn(async (_url: string, init: any) => JSON.parse(init.body).stream
+      ? new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_s","usage":{"input_tokens":1,"output_tokens":0}}}\n\n'))
+          controller.enqueue(encoder.encode('event: message_stop\ndata: {"type":"message_stop"}\n\n'))
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      : new Response(JSON.stringify({
+        id: 'msg_j', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const input = [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }]
+
+    await codexProxyResponses(makeProxyContext(target.routeKey, target.token, { input }))
+    const streamCtx = makeProxyContext(target.routeKey, target.token, { stream: true, input })
+    await codexProxyResponses(streamCtx)
+    for await (const _chunk of streamCtx.body) { /* drain */ }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    for (const call of fetchMock.mock.calls) expect(JSON.parse(call[1].body).max_tokens).toBe(4096)
+  })
+
+  it('returns canonical cached usage for non-streaming Anthropic Codex responses', async () => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'anthropic-compatible',
+      model: 'claude-sonnet-4-6',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'anthropic_messages',
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      id: 'msg_cached',
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 7, cache_read_input_tokens: 1200, cache_creation_input_tokens: 30, output_tokens: 5 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const ctx = makeProxyContext(target.routeKey, target.token, {
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+    })
+    await codexProxyResponses(ctx)
+
+    expect(ctx.body.usage).toEqual({
+      input_tokens: 1237,
+      input_tokens_details: { cached_tokens: 1200 },
+      output_tokens: 5,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 1242,
+    })
+  })
+
+  it('keeps cached prompt tokens inside input_tokens for Chat Completions providers', async () => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'chat_completions',
+    })
+    const encoder = new TextEncoder()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'))
+        controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":20,"total_tokens":1020,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":200,"completion_tokens_details":{"reasoning_tokens":12}}}\n\n'))
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+
+    const ctx = makeProxyContext(target.routeKey, target.token, {
+      stream: true,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+    })
+    await codexProxyResponses(ctx)
+
+    const chunks: string[] = []
+    for await (const chunk of ctx.body) chunks.push(String(chunk))
+    const sse = chunks.join('')
+    expect(sse).toContain('"usage":{"input_tokens":1000,"input_tokens_details":{"cached_tokens":800},"output_tokens":20,"output_tokens_details":{"reasoning_tokens":12},"total_tokens":1020}')
+    expect(sse).not.toContain('prompt_cache_hit_tokens')
   })
 
   it('preserves native Responses usage for Codex Responses providers', async () => {
@@ -3318,6 +3494,38 @@ describe('coding agent launch preparation', () => {
       reasoning: { effort: 'high', summary: 'auto' },
     })
     expect(sse).toContain('"usage":{"input_tokens":11,"output_tokens":2,"total_tokens":13}')
+  })
+
+  it.each([
+    { selected: 'high', native: { effort: 'low', summary: 'auto' }, expected: { effort: 'high', summary: 'auto' } },
+    { selected: 'none', native: { effort: 'high', summary: 'auto' }, expected: { effort: 'none', summary: 'auto' } },
+    { selected: undefined, native: { effort: 'medium', summary: 'auto' }, expected: { effort: 'medium', summary: 'auto' } },
+    { selected: '', native: undefined, expected: undefined },
+    { selected: 'invalid', native: { summary: 'auto' }, expected: { summary: 'auto' } },
+  ])('merges selected Responses effort $selected without discarding native reasoning options', async ({ selected, native, expected }) => {
+    const target = registerCodexProxyTarget({
+      profile: 'default', provider: 'test', model: 'test-model', baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-upstream', apiMode: 'codex_responses', reasoningEffort: selected, agentId: 'opencode',
+      agentSessionId: 'opencode-effort-options',
+    })
+    const response = { id: 'resp_options', object: 'response', status: 'completed', output: [] }
+    for (const stream of [false, true]) {
+      const fetchMock = vi.fn<typeof fetch>(async () => stream
+        ? new Response(`event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response })}\n\n`, {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+        : Response.json(response))
+      vi.stubGlobal('fetch', fetchMock)
+      const body = { input: 'hello', stream, ...(native ? { reasoning: { ...native } } : {}) }
+      const ctx = makeProxyContext(target.routeKey, target.token, body)
+      await codexProxyResponses(ctx)
+      expect(ctx.status).toBeUndefined()
+      if (stream) for await (const _chunk of ctx.body) { /* consume the proxy stream */ }
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const sent = JSON.parse(String(fetchMock.mock.calls[0][1]!.body))
+      expect(sent.reasoning).toEqual(expected)
+      expect(body.reasoning).toEqual(native)
+    }
   })
 
   it('maps Grok system messages before forwarding native Responses requests', async () => {
@@ -3919,7 +4127,7 @@ describe('coding agent provider validation and managed MCP guidance', () => {
     const input = { mode: 'global' as const, profile: 'default', sessionId: 'guidance', agentSessionId: 'guidance-run' }
     const first = await prepareCodingAgentLaunch(agent, input)
     expect(readFileSync(first.promptFile!, 'utf8')).toContain('ekko_studio_api_openapi_get')
-    for (const name of ['api', 'browser', 'devices', 'use', 'interaction']) {
+    for (const name of ['api', 'browser', 'use', 'interaction']) {
       await upsertCodingAgentMcpServer(agent, `ekko-studio-${name}`, { enabled: false }, { profile: 'default' })
     }
     const disabled = await prepareCodingAgentLaunch(agent, input)
@@ -3952,7 +4160,7 @@ it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'])('prepares %s
   const launch = await prepareCodingAgentLaunch(id, {
     mode: 'global', profile: 'research', workspace: join(home, 'workspace'),
     studioMcpTokenFile: tokenFile, groupSystemPrompt: 'Review the repository',
-    provider: 'custom:test', model: 'must-not-override-native-model', apiKey: 'must-not-write-upstream-key',
+    provider: 'custom:test', apiKey: 'must-not-write-upstream-key',
   })
   expect(launch).toMatchObject({ agentId: id, mode: 'global', provider: 'global', model: '', args: [], env: {} })
   expect(launch.nativeSystemPrompt).toContain('Review the repository')
@@ -3978,6 +4186,30 @@ it.each(['qwen', 'kimi', 'codebuddy', 'qoder', 'copilot'])('loads %s supplementa
   expect(launch.nativeMcpServers!['ekko-studio-interaction']).toBeDefined()
 })
 
+
+it.each(['glm-5.3', ''])('applies global ZCode effort to the native selection overlay for model %s', async model => {
+  const home = makeHome()
+  const builtinPath = join(home, 'builtin.json'), personalPath = join(home, 'personal.json')
+  writeFileSync(builtinPath, JSON.stringify({ config: { modelConfigRules: { builtinProviderModelRules: [
+    { providerId: 'native', modelId: 'glm-5.3', config: { optionSpecs: { reasoningLevel: { values: ['low', 'high', 'max'] } } } },
+  ] } } }))
+  const personal = JSON.stringify({ config: { defaultModelSelection: {
+    providerId: 'native', modelId: 'glm-5.3', options: { reasoningLevel: 'low' },
+  }, providerConfigRules: { providerRules: [{ providerId: 'native', config: { apiKey: 'native-secret' } }] } } })
+  writeFileSync(personalPath, personal)
+  vi.mocked(resolveZcodeCommand).mockResolvedValueOnce({ command: 'zcode', args: [], path: 'zcode', env: {
+    ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: builtinPath, ZCODE_PERSONAL_PROVIDER_CONFIG_FILE: personalPath,
+  } })
+  const launch = await prepareCodingAgentLaunch('zcode', {
+    mode: 'global', workspace: join(home, 'workspace'), model, reasoningEffort: 'max',
+  })
+  expect(launch).toMatchObject({ mode: 'global', provider: 'global', model, reasoningEffort: 'max' })
+  expect(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE).not.toBe(personalPath)
+  expect(JSON.parse(readFileSync(launch.env.ZCODE_PERSONAL_PROVIDER_CONFIG_FILE!, 'utf8')).config.defaultModelSelection)
+    .toEqual({ providerId: 'native', modelId: 'glm-5.3', options: { reasoningLevel: 'max' } })
+  expect(readFileSync(personalPath, 'utf8')).toBe(personal)
+  expect(launch.args).not.toContain('--effort')
+})
 
 it('uses desktop provider paths globally while retaining scoped ZCode configuration in chat and terminal launchers', async () => {
   const home = makeHome()

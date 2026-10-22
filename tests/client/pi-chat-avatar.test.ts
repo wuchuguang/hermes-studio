@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs'
+import { readPresetStyleSource as readFileSync } from './preset-style-source'
 import { describe, expect, it } from 'vitest'
 
 describe('Pi chat identity', () => {
@@ -20,7 +20,7 @@ describe('Pi chat identity', () => {
     const avatarHelper = readFileSync('packages/client/src/utils/chat-agent-avatar.ts', 'utf8')
     const chatStore = readFileSync('packages/client/src/stores/hermes/chat.ts', 'utf8')
 
-    expect(avatarHelper).toContain("pi: { label: 'Pi', src: '/coding-agents/pi.svg' }")
+    expect(avatarHelper).toContain("pi: { label: 'Pi', src: deploymentUrl('/coding-agents/pi.svg') }")
     expect(chatStore).toContain("if (codingAgentId === 'pi')")
     expect(chatStore).toContain("return { icon: '/coding-agents/pi.svg' }")
   })
