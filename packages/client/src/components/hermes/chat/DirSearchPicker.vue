@@ -22,7 +22,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ 'update:modelValue': [value: string[]] }>()
 
-const { recordWorkspaceUsage } = useDefaultWorkspace('default')
+const { recordWorkspaceUsage } = useDefaultWorkspace()
 
 const input = ref('')
 const hits = ref<Array<{ path: string; name: string }>>([])
@@ -62,7 +62,9 @@ function applyFrecency(found: Array<{ path: string; name: string }>) {
 let recentEntriesCache: Array<{ path: string; lastUsed: number; useCount: number }> | null = null
 function recentEntries() {
   if (!recentEntriesCache) {
-    recentEntriesCache = useDefaultWorkspace('default').loadRecentWorkspaces()
+    const ws = useDefaultWorkspace()
+    void ws.init().then(() => { recentEntriesCache = ws.recentWorkspaces.value })
+    recentEntriesCache = ws.recentWorkspaces.value
   }
   return recentEntriesCache
 }

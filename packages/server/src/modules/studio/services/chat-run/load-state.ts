@@ -59,8 +59,18 @@ export async function loadSessionStateFromDb(sid: string, _sessionMap: Map<strin
   return readSessionStateFromDb(sid)
 }
 
-/** Synchronous SQLite hydration keeps cache creation atomic with run admission. */
+/** Synchronous-entry variant: fires the async hydration and returns an empty
+ *  working state immediately. Cache admission treats it as "loading"; the
+ *  async completion replaces the state via the session map. */
 export function readSessionStateFromDb(sid: string): SessionState {
+  const placeholder: SessionState = { messages: [], isWorking: true, events: [], queue: [] }
+  void Promise.resolve(readSessionStateFromDbAsync(sid)).then((state) => {
+    Object.assign(placeholder, state)
+    placeholder.isWorking = state.isWorking
+  })
+  return placeholder
+}
+const readSessionStateFromDbAsync = async (sid: string): Promise<SessionState> => {
   try {
     const displayStartedAt = Date.now()
     let actualDetail = getSessionDetailPaginated(sid)

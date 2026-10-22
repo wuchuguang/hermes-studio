@@ -714,6 +714,7 @@ export async function saveSessionToObsidian(id: string): Promise<{ ok: boolean; 
     `/api/studio/sessions/${encodeURIComponent(id)}/save-obsidian`,
     { method: 'POST' },
   )
+}
 
 export interface UsageStatsFilters {
   origin?: 'internal' | 'external'

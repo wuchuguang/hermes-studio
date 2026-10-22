@@ -1741,7 +1741,8 @@ export async function setWorkspace(ctx: any) {
   }
   const patch: Record<string, unknown> = { workspace: normalizeDirectoryTarget(workspace || '') || null }
   if (extraDirs !== null) patch.workspace_extra_dirs = extraDirs
-  updateSession(id, patch as any)  ctx.body = { ok: true }
+  updateSession(id, patch as any)
+  ctx.body = { ok: true }
 }
 
 export async function setCategory(ctx: any) {

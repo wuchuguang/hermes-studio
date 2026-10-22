@@ -24,7 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { recordWorkspaceUsage } = useDefaultWorkspace('default')
+const { recordWorkspaceUsage } = useDefaultWorkspace()
 const selectedPath = ref(props.modelValue || '')
 
 watch(() => props.modelValue, (v) => { selectedPath.value = v || '' })
@@ -70,7 +70,9 @@ function onSearchInput() {
 let recentEntriesCache: Array<{ path: string; lastUsed: number; useCount: number }> | null = null
 function recentEntries() {
   if (!recentEntriesCache) {
-    recentEntriesCache = useDefaultWorkspace('default').loadRecentWorkspaces()
+    const ws = useDefaultWorkspace()
+    void ws.init().then(() => { recentEntriesCache = ws.recentWorkspaces.value })
+    recentEntriesCache = ws.recentWorkspaces.value
   }
   return recentEntriesCache
 }

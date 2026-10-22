@@ -930,10 +930,12 @@ const defaultWorkspaces = ref<string[]>([]);
 const recentWorkspaces = ref<Array<{ path: string; lastUsed: number; useCount: number }>>([]);
 let workspaceComposable: ReturnType<typeof useDefaultWorkspace> | null = null;
 
-function initWorkspaceComposable(profile: string) {
-  workspaceComposable = useDefaultWorkspace(profile);
-  defaultWorkspaces.value = workspaceComposable.loadDefaultWorkspaces();
-  recentWorkspaces.value = workspaceComposable.loadRecentWorkspaces();
+function initWorkspaceComposable() {
+  workspaceComposable = useDefaultWorkspace();
+  void workspaceComposable.init().then(() => {
+    defaultWorkspaces.value = workspaceComposable!.defaultWorkspaces.value;
+    recentWorkspaces.value = workspaceComposable!.recentWorkspaces.value;
+  });
 }
 
 function handleToggleDefaultWorkspace() {
@@ -1244,7 +1246,7 @@ watch(
     ensureNewChatProviderSelection();
     // Reload workspace data when profile changes
     if (newChatProfile.value) {
-      initWorkspaceComposable(newChatProfile.value);
+      initWorkspaceComposable();
     }
   },
 );
@@ -1310,7 +1312,7 @@ function openNewChatModal() {
     profilesStore.profiles.find((profile) => profile.active)?.name ||
     profilesStore.profiles[0]?.name ||
     "default";
-  initWorkspaceComposable(newChatProfile.value);
+  initWorkspaceComposable();
   newChatWorkspace.value = mostRecentDefaultWorkspace.value || "";
   syncNewChatModelSelection();
 
@@ -1414,8 +1416,9 @@ async function confirmNewChat() {
   });
   // Record workspace to recent list
   if (newChatWorkspace.value && workspaceComposable) {
-    workspaceComposable.recordWorkspaceUsage(newChatWorkspace.value);
-    recentWorkspaces.value = workspaceComposable.loadRecentWorkspaces();
+    void workspaceComposable.recordWorkspaceUsage(newChatWorkspace.value).then(() => {
+      recentWorkspaces.value = workspaceComposable!.recentWorkspaces.value;
+    });
   }
   
   await router.push({

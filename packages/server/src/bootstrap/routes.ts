@@ -29,7 +29,8 @@ import { mcuDevicePublicRoutes, mcuDeviceRoutes } from '../modules/studio/routes
 import { sessionRoutes } from '../modules/studio/routes/sessions'
 import { projectRoutes } from '../modules/studio/routes/projects'
 import { cronRoutes } from '../modules/studio/routes/cron'
-import { modelApiRoutes } from '../modules/studio/routes/model-api'import { sessionSharePublicRoutes, sessionShareRoutes } from '../modules/studio/routes/session-shares'
+import { modelApiRoutes } from '../modules/studio/routes/model-api'
+import { sessionSharePublicRoutes, sessionShareRoutes } from '../modules/studio/routes/session-shares'
 import { profileRoutes } from '../modules/hermes/routes/profiles'
 import { skillRoutes } from '../modules/hermes/routes/skills'
 import { skillBundleRoutes } from '../modules/hermes/routes/skill-bundles'
@@ -116,7 +117,8 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(sessionRoutes.routes())
   app.use(projectRoutes.routes())
   app.use(cronRoutes.routes())
-  app.use(modelApiRoutes.routes())  app.use(sessionShareRoutes.routes())
+  app.use(modelApiRoutes.routes())
+  app.use(sessionShareRoutes.routes())
   app.use(profileRoutes.routes())
   app.use(ekkoMemoryRoutes.routes())
   app.use(ekkoSkillRoutes.routes())

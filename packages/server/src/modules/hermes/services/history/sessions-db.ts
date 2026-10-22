@@ -1,7 +1,8 @@
 import { getActiveProfileDir, getHermesBaseDir } from '../profiles/profile'
 import { join } from 'path'
 import { existsSync, readdirSync } from 'fs'
-import type { LocalUsageStats, UsageStatsFilters } from '../../../studio/contracts/runs/usage'import { emptyCostCoverage } from '../../../studio/public/usage'
+import type { LocalUsageStats, UsageStatsFilters } from '../../../studio/contracts/runs/usage'
+import { emptyCostCoverage } from '../../../studio/public/usage'
 import type { ExternalSkillUsageEvent } from '../../../studio/contracts/skills'
 
 const SQLITE_AVAILABLE = (() => {
