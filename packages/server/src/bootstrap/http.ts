@@ -523,6 +523,16 @@ export async function bootstrap() {
     if ((ctx.method === 'GET' || ctx.method === 'HEAD') &&
       !ctx.path.startsWith('/api') &&
       ctx.path !== '/health') {
+      // Only HTML navigations fall through to the SPA shell. A missing FILE
+      // (old hashed asset after a redeploy) must 404: serving index.html as
+      // text/html for a module script request causes a strict-MIME white screen
+      // that no amount of retries can recover from.
+      if (/\.[a-z0-9]{1,8}$/i.test(ctx.path)) {
+        ctx.status = 404
+        ctx.set('Cache-Control', 'no-store')
+        ctx.body = { error: 'asset not found (stale shell?)', path: ctx.path }
+        return
+      }
       ctx.set('Cache-Control', SPA_ENTRY_CACHE_CONTROL)
       await send(ctx, 'index.html', { root: distDir, setHeaders: setStaticHeaders })
     }

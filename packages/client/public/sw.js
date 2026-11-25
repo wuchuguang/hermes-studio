@@ -144,10 +144,11 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // SPA 导航请求: 缓存壳秒出 + 后台刷新 (隧道 RTT 是启动瓶颈, 不让用户等)
-  // 首次无缓存时走网络; index.html 只有 4KB, 引用的 hash 资产 cacheFirst 兜底
+  // SPA 导航请求: network-first — 在线必须拿最新壳, 否则旧壳引用的 hash 资产可能
+  // 已被新部署删除, 白屏 MIME 错误 (sw 曾用 staleWhileRevalidate 秒回旧壳, 每次更新
+  // 后首开必白屏); 离线/网络失败才回缓存壳。
   if (request.mode === 'navigate') {
-    event.respondWith(staleWhileRevalidate(request, SHELL_CACHE))
+    event.respondWith(networkFirst(request, SHELL_CACHE))
     return
   }
 

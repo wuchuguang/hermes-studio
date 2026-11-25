@@ -44,3 +44,27 @@
   // 键盘收起后清一次残留偏移
   document.addEventListener('focusout', () => setTimeout(resetPan, 350))
 })()
+
+// Shell 自愈 (2026-11-25): 部署后旧壳引用已删除的 hash 资产 → 模块脚本加载失败 →
+// 白屏僵死。捕获 script 资源错误 (capture 阶段, target 是 <script> 元素本身), 清
+// SW 缓存后强刷一次 (sessionStorage 防循环)。
+;(() => {
+  const KEY = 'hermes-shell-recovered'
+  window.addEventListener('error', (ev) => {
+    const t = ev.target || ev.srcElement
+    if (!(t instanceof HTMLScriptElement) || t.src === location.href) return
+    if (sessionStorage.getItem(KEY)) return
+    sessionStorage.setItem(KEY, '1')
+    if (navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        for (const reg of regs) reg.unregister()
+        return caches.keys()
+      }).then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+        .finally(() => location.reload())
+    } else {
+      location.reload()
+    }
+  }, true)
+  // 成功启动后解除防循环标记 (应用入口里也调不到这里, 用 load 事件近似)
+  window.addEventListener('load', () => setTimeout(() => sessionStorage.removeItem(KEY), 8000))
+})()
