@@ -1015,6 +1015,25 @@ export async function getSessionDetailFromDbWithProfile(sessionId: string, profi
   }
 }
 
+/**
+ * dbPath → whether its messages table has the compaction `active` column.
+ * Desktop hermes hides compacted rows (active = 0); the web must do the same
+ * or the paginated resume leaks pre-compaction residue into the chat.
+ */
+const activeColumnSupport = new Map<string, boolean>()
+
+function messagesActiveClause(db: any, dbPathKey: string): string {
+  let supported = activeColumnSupport.get(dbPathKey)
+  if (supported === undefined) {
+    try {
+      const cols = db.prepare('PRAGMA table_info(messages)').all() as { name?: string }[]
+      supported = Array.isArray(cols) && cols.some(col => col.name === 'active')
+    } catch { supported = false }
+    activeColumnSupport.set(dbPathKey, supported)
+  }
+  return supported ? ' AND (active IS NULL OR active = 1)' : ''
+}
+
 export async function getSessionDetailPaginatedFromDbWithProfile(
   sessionId: string,
   profile: string,
@@ -1029,16 +1048,17 @@ export async function getSessionDetailPaginatedFromDbWithProfile(
     const ids = chain.map(session => session.id)
     const placeholders = ids.map(() => '?').join(', ')
     const orderSql = chainOrderSql(ids)
+    const activeClause = messagesActiveClause(db, sessionDbPathForProfile(profile))
     const totalRow = db.prepare(`
       SELECT COUNT(*) AS total
       FROM messages
-      WHERE session_id IN (${placeholders})
+      WHERE session_id IN (${placeholders})${activeClause}
     `).get(...ids) as { total: number } | undefined
     const total = Number(totalRow?.total || 0)
 
     const messageRows = db.prepare(`
       SELECT * FROM messages
-      WHERE session_id IN (${placeholders})
+      WHERE session_id IN (${placeholders})${activeClause}
       ORDER BY CASE session_id ${orderSql} ELSE ${ids.length} END DESC, id DESC
       LIMIT ? OFFSET ?
     `).all(...ids, ...ids, limit, offset) as Record<string, unknown>[]
@@ -1067,10 +1087,14 @@ export async function getSessionMessageCountFromDbWithProfile(
     if (!chain.length) return null
     const ids = chain.map(session => session.id)
     const placeholders = ids.map(() => '?').join(', ')
+    // Keep in sync with getSessionDetailPaginatedFromDbWithProfile: the
+    // freshness probe compares this count against the paginated total, so an
+    // unfiltered count here would flag every resume as stale.
+    const activeClause = messagesActiveClause(db, sessionDbPathForProfile(profile))
     const totalRow = db.prepare(`
       SELECT COUNT(*) AS total
       FROM messages
-      WHERE session_id IN (${placeholders})
+      WHERE session_id IN (${placeholders})${activeClause}
     `).get(...ids) as { total: number } | undefined
     return Number(totalRow?.total || 0)
   } finally {
