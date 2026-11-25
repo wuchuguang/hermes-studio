@@ -23,6 +23,7 @@ import {
   getHermesSessionDetail,
   getHermesSessionDetailForProfile,
   getHermesSessionMessageCount,
+  findHermesSessionProfile,
   getHermesSessionDetailPaginatedForProfile,
   getExactHermesSessionDetailForProfile,
   getCompressionContinuation,
@@ -1386,11 +1387,12 @@ export async function getHermesSession(ctx: any) {
       try {
         // Cheap freshness probe: compare message counts before pulling the
         // full state.db detail (which can be >1MB for long sessions).
-        const stateCount = await getHermesSessionMessageCount(ctx.params.id, localSessionProfile)
+        // Probe the db that actually owns the session — the local row may be a
+        // shadow filed under another profile than the desktop session's db.
+        const stateDbProfile = (await findHermesSessionProfile(ctx.params.id)) || localSessionProfile
+        const stateCount = await getHermesSessionMessageCount(ctx.params.id, stateDbProfile)
         if (stateCount != null && stateCount > (localSession.message_count || 0)) {
-          const stateSession = profile
-            ? await getHermesSessionDetailForProfile(ctx.params.id, profile)
-            : await getHermesSessionDetail(ctx.params.id)
+          const stateSession = await getHermesSessionDetailForProfile(ctx.params.id, stateDbProfile)
           if (stateSession && isHermesHistorySessionSource(stateSession.source)) {
             detailSession = stateSession
             detailSource = 'state'
@@ -1425,16 +1427,20 @@ export async function getHermesSession(ctx: any) {
 
   // Try Hermes state.db next (consistent with listHermesSessions)
   try {
-    const session = profile
-      ? await getHermesSessionDetailForProfile(ctx.params.id, profile)
+    // Read from the db that owns the session: the requested profile may be
+    // absent (deep link) or not the one the desktop session lives in, and the
+    // access check below must see the session's real profile.
+    const stateDbProfile = (await findHermesSessionProfile(ctx.params.id)) || profile
+    const session = stateDbProfile
+      ? await getHermesSessionDetailForProfile(ctx.params.id, stateDbProfile)
       : await getHermesSessionDetail(ctx.params.id)
     if (session && isHermesHistorySessionSource(session.source)) {
-      const matchingLocalSession = localSession && (!profile || localSessionProfile === profile)
+      const matchingLocalSession = localSession && (!stateDbProfile || localSessionProfile === stateDbProfile)
         ? localSession
         : null
       const sessionWithProfile = {
         ...session,
-        ...(profile ? { profile } : {}),
+        ...(stateDbProfile ? { profile: stateDbProfile } : {}),
         push_enabled: Number(matchingLocalSession?.push_enabled || 0) !== 0 ? 1 : 0,
       }
       if (denySessionAccess(ctx, sessionWithProfile)) return
