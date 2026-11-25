@@ -639,8 +639,7 @@ export async function list(ctx: any) {
   }
   const sessions = filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
       isRequestedSessionSource(source, s.source) &&
-      // hermes-merged rows (webui_imported === false) carry no studio profile column — keep them
-      (!knownProfiles || knownProfiles.has(s.profile || 'default') || (s as any).webui_imported === false),
+      (!knownProfiles || knownProfiles.has(s.profile || 'default')),
     )))
   ctx.body = {
     sessions: paginated ? sessions.slice(0, effectiveLimit) : sessions,

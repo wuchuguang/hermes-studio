@@ -1,5 +1,5 @@
 import { getActiveProfileDir, getHermesBaseDir } from '../profiles/profile'
-import { join } from 'path'
+import { basename, dirname, join } from 'path'
 import { existsSync, readdirSync } from 'fs'
 import type { LocalUsageStats, UsageStatsFilters } from '../../../studio/contracts/runs/usage'
 import { emptyCostCoverage } from '../../../studio/public/usage'
@@ -17,6 +17,12 @@ const SEARCH_CANDIDATE_MIN = 100
 export interface HermesSessionRow {
   id: string
   source: string
+  /**
+   * Owning hermes profile ('default' = root state.db). Set by the cross-profile
+   * listings so callers can target the *WithProfile read APIs; undefined on rows
+   * read from a single unnamed db.
+   */
+  profile?: string | null
   user_id: string | null
   model: string
   title: string | null
@@ -106,6 +112,14 @@ function sessionDbPathForProfile(profile?: string): string {
   return join(getHermesBaseDir(), 'profiles', name, 'state.db')
 }
 
+/** Inverse of sessionDbPathForProfile: the profile owning a state.db path
+ *  (<base>/state.db = 'default', <base>/profiles/<name>/state.db = <name>). */
+function profileForDbPath(dbPath: string): string {
+  const dir = dirname(dbPath)
+  const profilesDir = join(getHermesBaseDir(), 'profiles')
+  return dir !== profilesDir && dirname(dir) === profilesDir ? basename(dir) : 'default'
+}
+
 /**
  * All profile state.db files that exist on disk: the base dir plus every
  * profiles/<name>/state.db. Desktop Bot Mode (2026-09) gives each bot its own
@@ -147,7 +161,13 @@ function loadAllSessionsAcrossProfiles(): SessionIndex {
     try {
       db = new DatabaseSync(dbPath, { open: true, readOnly: true })
       const one = loadAllSessions(db)
-      for (const [id, row] of one.byId) byId.set(id, row)
+      // Tag every row with its owning profile: consumers (sidebar merge, resume,
+      // paginated messages) need it to address the *WithProfile read APIs.
+      const profile = profileForDbPath(dbPath)
+      for (const [id, row] of one.byId) {
+        row.profile = profile
+        byId.set(id, row)
+      }
       for (const [parent, ids] of one.childrenByParent) {
         const list = childrenByParent.get(parent) || []
         list.push(...ids)
@@ -802,16 +822,39 @@ async function openSessionDb(profile?: string) {
  */
 async function openSessionDbForSession(sessionId: string) {
   const { DatabaseSync } = await import('node:sqlite')
-  const tried: string[] = []
-  for (const dbPath of [sessionDbPath(), ...allSessionDbPaths()]) {
-    if (tried.includes(dbPath)) continue
-    tried.push(dbPath)
+  for (const dbPath of candidateSessionDbPaths()) {
     try {
       const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
       const row = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)
       if (row) return db
       db.close()
     } catch { /* skip unreadable db */ }
+  }
+  return null
+}
+
+/** Active profile's db first (the usual case), then every other profile db. */
+function candidateSessionDbPaths(): string[] {
+  return [...new Set([sessionDbPath(), ...allSessionDbPaths()])]
+}
+
+/**
+ * Companion to openSessionDbForSession: the NAME of the profile owning
+ * sessionId ('default' = root state.db), so callers that need the *WithProfile
+ * read APIs (resume, paginated messages) hit the right db instead of assuming
+ * the root one. null when no hermes db has the session.
+ */
+export async function findSessionProfileFromDb(sessionId: string): Promise<string | null> {
+  if (!SQLITE_AVAILABLE) return null
+  const { DatabaseSync } = await import('node:sqlite')
+  for (const dbPath of candidateSessionDbPaths()) {
+    let db: (SessionLookupDb & { close: () => void }) | null = null
+    try {
+      db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+      const row = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)
+      if (row) return profileForDbPath(dbPath)
+    } catch { /* skip unreadable db */ }
+    finally { try { db?.close() } catch { /* already closed */ } }
   }
   return null
 }
@@ -1862,7 +1905,8 @@ export async function listSessionSummaries(source?: string, limit = 2000, profil
     return [...idx.byId.values()]
       .filter(session => !source || session.source === source)
       .filter(session => !isCompressionContinuationChild(session, idx))
-      .map(session => projectSessionSummary(session, collectSessionChain(session, idx)))
+      // explicit-profile query: every row of this db belongs to that profile
+      .map(session => projectSessionSummary({ ...session, profile }, collectSessionChain(session, idx)))
       .sort(compareSessionSummariesNewestFirst)
       .slice(0, limit)
   } finally {

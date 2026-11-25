@@ -64,7 +64,7 @@ import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, li
 import { deleteSessionMessageGroups } from '../repositories/session-message-deletion'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
-import { getHermesSessionMessageCount } from '../public/session-agent-runtime'
+import { findHermesSessionProfile, getHermesSessionMessageCount } from '../public/session-agent-runtime'
 import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../public/profile-config'
 import {
   getChatCodingAgentMcpServers,
@@ -1031,14 +1031,20 @@ export class ChatRunSocket {
       }
       const session = getSession(sessionId)
       if (!session) {
-        // Desktop sessions live only in ~/.hermes/state.db until first synced
+        // Desktop sessions live only in a hermes state.db until first synced
         // into the studio-local DB. Without this probe, resume for such
         // sessions threw 'Session not found' (surfacing client-side as a bare
         // 'resume timeout') even though loadSessionStateFromDb could serve
         // them. Cheap COUNT probe against state.db decides.
-        const count = await getHermesSessionMessageCount(sessionId, 'default')
+        // Desktop Bot Mode gives each profile its own db, so resolve the owning
+        // one by id — assuming the root db never finds dev/pm/qa sessions.
+        const stateDbProfile = (await findHermesSessionProfile(sessionId)) ?? 'default'
+        const count = await getHermesSessionMessageCount(sessionId, stateDbProfile)
         if (count == null) throw new Error('Session not found')
-        return 'default'
+        if (socketUser && !this.canAccessProfile(socketUser, stateDbProfile)) {
+          throw new Error(`Profile "${stateDbProfile}" is not available for this user`)
+        }
+        return stateDbProfile
       }
       const sessionProfile = String(session.profile || 'default').trim() || 'default'
       if (!profileExists(sessionProfile)) {
@@ -2409,12 +2415,13 @@ export class ChatRunSocket {
       state = await loadSessionStateFromDb(sid, this.sessionMap)
       this.sessionMap.set(sid, state)
     } else {
-      // Freshness check: desktop keeps appending to ~/.hermes/state.db while a
-      // cached SessionState here stays frozen — resume would keep serving the
-      // stale snapshot until process restart. One cheap COUNT probe decides
-      // whether to reload the full state.
+      // Freshness check: desktop keeps appending to the session's profile
+      // state.db while a cached SessionState here stays frozen — resume would
+      // keep serving the stale snapshot until process restart. One cheap COUNT
+      // probe decides whether to reload the full state.
       try {
-        const stateCount = await getHermesSessionMessageCount(sid, 'default')
+        const stateDbProfile = (await findHermesSessionProfile(sid)) ?? 'default'
+        const stateCount = await getHermesSessionMessageCount(sid, stateDbProfile)
         if (stateCount != null && stateCount > (state.messageTotal || 0)) {
           logger.info('[chat-run-socket] session %s cached state stale (%s < %s), reloading', sid, state.messageTotal, stateCount)
           state = await loadSessionStateFromDb(sid, this.sessionMap)

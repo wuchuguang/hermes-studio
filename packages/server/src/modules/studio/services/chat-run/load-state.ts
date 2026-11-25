@@ -4,7 +4,7 @@ import {
   getSessionDetailPaginated,
   type PaginatedSessionDetailResult,
 } from '../../repositories/session-store'
-import { getSessionDetailPaginatedFromDbWithProfile } from '../../../hermes/services/history/sessions-db'
+import { findSessionProfileFromDb, getSessionDetailPaginatedFromDbWithProfile } from '../../../hermes/services/history/sessions-db'
 import { getRecordedUsageTotals, getUsage } from '../../repositories/usage-store'
 import { logger } from '../../public/logging'
 import { handleMessage } from './message-format'
@@ -75,17 +75,21 @@ const readSessionStateFromDbAsync = async (sid: string): Promise<SessionState> =
     const displayStartedAt = Date.now()
     let actualDetail = getSessionDetailPaginated(sid)
 
-    // Fallback: session lives in ~/.hermes/state.db (e.g. desktop sessions),
-    // not in the studio-local DB. Read it read-only from the shared state DB.
+    // Desktop sessions live in a hermes state.db, not in the studio-local DB.
+    // Desktop Bot Mode gives each bot profile its own db (profiles/<name>/
+    // state.db), so locate the owning db by id instead of assuming the root one
+    // — a hardcoded 'default' never sees sessions of profiles like dev/pm/qa.
+    const stateDbProfile = (await findSessionProfileFromDb(sid)) ?? 'default'
+
     // Freshness probe: a stale local snapshot (source often mislabeled 'cli')
     // must not shadow a live state.db session that has grown past it — resume
     // would keep serving outdated messages. Compare cheap counts first.
     if (actualDetail) {
       try {
         const { getSessionMessageCountFromDbWithProfile } = await import('../../../hermes/services/history/sessions-db')
-        const stateCount = await getSessionMessageCountFromDbWithProfile(sid, 'default')
+        const stateCount = await getSessionMessageCountFromDbWithProfile(sid, stateDbProfile)
         if (stateCount != null && stateCount > (actualDetail.total || 0)) {
-          const freshDetail = await getSessionDetailPaginatedFromDbWithProfile(sid, 'default')
+          const freshDetail = await getSessionDetailPaginatedFromDbWithProfile(sid, stateDbProfile)
           if (freshDetail) {
             actualDetail = freshDetail as unknown as PaginatedSessionDetailResult
             logger.info('[chat-run-socket] session %s local snapshot stale (< %d), loaded from state.db', sid, stateCount)
@@ -97,7 +101,7 @@ const readSessionStateFromDbAsync = async (sid: string): Promise<SessionState> =
     }
     if (!actualDetail) {
       try {
-        const fallbackDetail = await getSessionDetailPaginatedFromDbWithProfile(sid, 'default')
+        const fallbackDetail = await getSessionDetailPaginatedFromDbWithProfile(sid, stateDbProfile)
         if (fallbackDetail) {
           actualDetail = fallbackDetail as unknown as PaginatedSessionDetailResult
           logger.info('[chat-run-socket] session %s loaded from shared state.db fallback (%d messages)', sid, fallbackDetail.messages.length)
