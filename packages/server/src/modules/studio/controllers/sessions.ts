@@ -1,4 +1,5 @@
 import { personDisplayMessages, personDisplayPage, personDisplayMetadata, PERSON_DISPLAY_PROJECTION } from '../services/chat-run/person-display'
+import { listSessionSummaries, getSessionMessagesFromDb } from '../../hermes/services/history/sessions-db'
 import { personConversationFlows, personConversationTimeline } from '../services/person/flow-conversation'
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
@@ -470,6 +471,57 @@ export async function listConversations(ctx: any) {
     is_active: s.ended_at == null && (Date.now() / 1000 - s.last_active) <= 300,
     thread_session_count: 1,
   }))
+
+  // Fork: desktop hermes sessions live in ~/.hermes state.dbs (root + profiles/*),
+  // not in the studio-local DB — merge them so the sidebar shows cross-profile history.
+  try {
+    const hermesRows = await listSessionSummaries(source, 2000, profile || undefined) as any[]
+    const seen = new Set(summaries.map(s => s.id))
+    for (const row of hermesRows) {
+      if (seen.has(row.id)) continue
+      seen.add(row.id)
+      summaries.push({
+        id: row.id,
+        profile: row.profile || null,
+        source: row.source,
+        agent: row.agent || null,
+        agent_mode: row.agent_mode || null,
+        agent_session_id: row.agent_session_id || null,
+        agent_native_session_id: row.agent_native_session_id || null,
+        agent_preset: row.agent_preset || null,
+        bot_type: row.bot_type || null,
+        model: row.model,
+        provider: row.provider || null,
+        api_mode: row.api_mode || null,
+        reasoning_effort: row.reasoning_effort || null,
+        title: row.title,
+        started_at: row.started_at,
+        ended_at: row.ended_at,
+        last_active: row.last_active,
+        message_count: row.message_count,
+        tool_call_count: row.tool_call_count,
+        input_tokens: row.input_tokens || 0,
+        output_tokens: row.output_tokens || 0,
+        cache_read_tokens: row.cache_read_tokens || 0,
+        cache_write_tokens: row.cache_write_tokens || 0,
+        reasoning_tokens: row.reasoning_tokens || 0,
+        billing_provider: row.billing_provider || null,
+        estimated_cost_usd: row.estimated_cost_usd || 0,
+        actual_cost_usd: row.actual_cost_usd || null,
+        cost_status: row.cost_status || null,
+        preview: row.preview,
+        workspace: row.workspace || null,
+        workspace_extra_dirs: row.workspace_extra_dirs || [],
+        is_archived: row.is_archived || 0,
+        is_active: row.ended_at == null && (Date.now() / 1000 - row.last_active) <= 300,
+        thread_session_count: 1,
+      })
+    }
+    summaries.sort((a: any, b: any) => (b.last_active || 0) - (a.last_active || 0))
+    if (limit && limit > 0 && summaries.length > limit) summaries.length = limit
+  } catch (err) {
+    logger.warn(err, 'listConversations: hermes state.db merge failed')
+  }
   ctx.body = { sessions: filterPendingDeletedConversationSummaries(filterByAllowedProfiles(ctx, summaries)) }
 }
 
@@ -478,6 +530,33 @@ export async function getConversationMessages(ctx: any) {
 
   const detail = localGetSessionDetail(ctx.params.id)
   if (!detail) {
+    // Fork: desktop hermes sessions live in ~/.hermes state.dbs — cross-db fallback.
+    try {
+      const fromDb = await getSessionMessagesFromDb(ctx.params.id)
+      if (fromDb && fromDb.messages && fromDb.messages.length > 0) {
+        const msgs = fromDb.messages
+          .filter(m => {
+            if (humanOnly && m.role !== 'user' && m.role !== 'assistant') return false
+            return Boolean(m.content)
+          })
+          .map(m => ({
+            id: m.id,
+            session_id: m.session_id,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            timestamp: (m as any).timestamp,
+          }))
+        ctx.body = {
+          session_id: ctx.params.id,
+          messages: msgs,
+          visible_count: msgs.length,
+          thread_session_count: 1,
+        }
+        return
+      }
+    } catch (err) {
+      logger.warn(err, 'getConversationMessages: state.db fallback failed')
+    }
     ctx.status = 404
     ctx.body = { error: 'Conversation not found' }
     return
