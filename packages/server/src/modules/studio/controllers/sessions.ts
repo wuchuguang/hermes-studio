@@ -1383,7 +1383,10 @@ export async function getHermesSession(ctx: any) {
   const localSessionProfile = (localSession?.profile || 'default') as string
   if (localSession && isHermesHistorySessionSource(localSession.source) && (!profile || localSessionProfile === profile)) {
     detailSession = localSession
-    if (isHermesAgentAvailable() && (localSession.message_count || 0) > 0) {
+    // Probe even for 0-message local rows: bare shadows (created by a settings
+    // change on the phone) must not be served as an empty history — the count
+    // comparison is cheap and only pulls the full state.db detail when ahead.
+    if (isHermesAgentAvailable()) {
       try {
         // Cheap freshness probe: compare message counts before pulling the
         // full state.db detail (which can be >1MB for long sessions).
