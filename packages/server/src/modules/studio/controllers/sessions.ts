@@ -174,7 +174,7 @@ function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
 }
 
 function isVisibleWebUiSessionSource(source?: string | null): boolean {
-  return source === 'api_server' || source === 'cli' || source === 'desktop' || source === 'builtin_agent' || source === 'coding_agent' || source === 'global_agent'}
+  return source === 'api_server' || source === 'cli' || source === 'desktop' || source === 'local' || source === 'gui' || source === 'builtin_agent' || source === 'coding_agent' || source === 'global_agent'}
 
 function isRequestedSessionSource(source: string | undefined, sessionSource?: string | null): boolean {
   if (source === 'builtin_agent') return sessionSource === 'builtin_agent'
@@ -639,7 +639,8 @@ export async function list(ctx: any) {
   }
   const sessions = filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
       isRequestedSessionSource(source, s.source) &&
-      (!knownProfiles || knownProfiles.has(s.profile || 'default')),
+      // hermes-merged rows (webui_imported === false) carry no studio profile column — keep them
+      (!knownProfiles || knownProfiles.has(s.profile || 'default') || (s as any).webui_imported === false),
     )))
   ctx.body = {
     sessions: paginated ? sessions.slice(0, effectiveLimit) : sessions,
