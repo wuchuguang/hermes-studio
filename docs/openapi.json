@@ -24190,10 +24190,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string",
-              "enum": [
-                "desktop"
-              ]
+              "type": "string"
             }
           }
         ]

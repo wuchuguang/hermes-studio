@@ -479,6 +479,7 @@ export async function listConversations(ctx: any) {
     const seen = new Set(summaries.map(s => s.id))
     for (const row of hermesRows) {
       if (seen.has(row.id)) continue
+      if (!['desktop', 'local', 'gui'].includes(row.source)) continue
       seen.add(row.id)
       summaries.push({
         id: row.id,
@@ -628,7 +629,7 @@ export async function list(ctx: any) {
       const hermesSessions = await listHermesSessionSummaries(undefined, effectiveLimit, profile)
       const localIds = new Set(allSessions.map((session: any) => session.id))
       const external = hermesSessions
-        .filter((session: any) => session.source === 'desktop')
+        .filter((session: any) => ['desktop', 'local', 'gui'].includes(session.source))
         .filter((session: any) => !localIds.has(session.id))
         .map((session: any) => ({ ...session, webui_imported: false }))
       if (external.length > 0) allSessions = [...allSessions, ...external]
