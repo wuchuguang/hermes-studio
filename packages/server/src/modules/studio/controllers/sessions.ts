@@ -1,5 +1,5 @@
 import { personDisplayMessages, personDisplayPage, personDisplayMetadata, PERSON_DISPLAY_PROJECTION } from '../services/chat-run/person-display'
-import { listSessionSummaries, getSessionMessagesFromDb } from '../../hermes/services/history/sessions-db'
+import { listSessionSummaries, getSessionMessagesFromDb, getExactSessionDetailFromDbWithProfile } from '../../hermes/services/history/sessions-db'
 import { personConversationFlows, personConversationTimeline } from '../services/person/flow-conversation'
 import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
@@ -1980,11 +1980,42 @@ export async function setModel(ctx: any) {
 
 export async function setReasoningEffort(ctx: any) {
   const id = ctx.params.id
-  const existing = localGetSession(id)
+  let existing = localGetSession(id)
   if (!existing) {
-    ctx.status = 404
-    ctx.body = { error: 'Session not found' }
-    return
+    // Fork: hermes desktop sessions (state.db) have no studio shadow row yet —
+    // create one (mirroring setModel) so per-session reasoning effort persists.
+    // Probe each profile db so the shadow row lands in the RIGHT profile
+    // (otherwise the known-profiles list filter would drop it from the sidebar).
+    let hermesRow: any = null
+    let hermesProfile: string | undefined
+    try {
+      for (const p of listProfileNamesFromDisk()) {
+        const row = await getExactSessionDetailFromDbWithProfile(id, p).catch(() => null)
+        if (row) { hermesRow = row; hermesProfile = p; break }
+      }
+    } catch { /* state.db unavailable */ }
+    if (!hermesRow) {
+      ctx.status = 404
+      ctx.body = { error: 'Session not found' }
+      return
+    }
+    const { createSession } = await import('../public/sessions')
+    createSession({
+      id,
+      profile: hermesProfile || requestedProfile(ctx) || 'default',
+      title: hermesRow.title || '',
+      model: hermesRow.model || '',
+      provider: hermesRow.provider || '',
+      api_mode: hermesRow.api_mode || '',
+      reasoning_effort: hermesRow.reasoning_effort || '',
+      workspace: hermesRow.workspace || undefined,
+    } as any)
+    existing = localGetSession(id)
+    if (!existing) {
+      ctx.status = 404
+      ctx.body = { error: 'Session not found' }
+      return
+    }
   }
   if (denySessionAccess(ctx, existing)) return
 
