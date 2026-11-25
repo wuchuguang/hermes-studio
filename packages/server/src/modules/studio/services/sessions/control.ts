@@ -6,6 +6,7 @@ import { isPrivatePersonSession, ownsPersonSession } from '../../contracts/perso
 import { isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { resolveAgentStatusId } from '../agent-availability'
 import { getChatRunServer } from '../../public/chat-run'
+import { requestSessionRunCancel } from '../session-run-registry'
 import { businessEvents } from '../webhooks/business-events'
 import { pluginAgentIsGlobalOnly } from '../agents/registry'
 
@@ -48,6 +49,13 @@ export async function stopSession(user: AuthenticatedUser | undefined, profile: 
   const server = getChatRunServer()
   if (!server) failure('Chat runtime is unavailable', 503)
   const stopped = server.isSessionRunning(id)
-  if (stopped) await server.abortSession(id, 'Stopped by user')
-  return { ok: true, session_id: id, stopped }
+  if (stopped) {
+    await server.abortSession(id, 'Stopped by user')
+    return { ok: true, session_id: id, stopped: true }
+  }
+  // Not ours: a desktop/gateway run may own the session. Leave a cooperative
+  // cancel request in the shared run registry — the owning side's sync loop
+  // (desktop runtime once it joins) picks it up and stops the run itself.
+  const entry = requestSessionRunCancel(id)
+  return { ok: true, session_id: id, stopped: false, cancel_requested: !!entry, origin: entry?.origin ?? null }
 }

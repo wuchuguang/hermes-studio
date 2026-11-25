@@ -8,8 +8,8 @@ import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
 import { applyPersonTimelinePage, applyPersonFlowUpdate, preservePersonTimelineWindow } from '@/utils/person-timeline'
 import type { PendingInboxEvent } from '@/api/studio/pending-inbox'
-import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
-import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
+import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, onSessionRunExternalChange, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { archiveSession as archiveSessionApi, cancelSessionRun, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId } from '@/api/coding-agents'
@@ -506,6 +506,8 @@ export interface Session {
   isPinned?: boolean
   isArchived?: boolean
   pushEnabled?: boolean
+  /** Session is actively running outside this server (desktop/gateway run). */
+  externalRunning?: boolean
   workspace?: string | null
   workspaceExtraDirs?: string[]
   categoryId?: number | null
@@ -1224,6 +1226,7 @@ export function mapHermesSession(s: SessionSummary): Session {
     botType: s.bot_type || undefined,
     reasoningEffort: s.reasoning_effort || undefined,
     messageCount: s.message_count,
+    externalRunning: !!s.external_running,
     messageTotal: s.message_count,
     loadedMessageCount: 0,
     hasMoreBefore: false,
@@ -1375,6 +1378,16 @@ function createChatState(scopedSessionId?: string) {
   const cancelledAttachmentDrafts = ref(new Map<string, { content: string; attachments: Attachment[] }>())
   /** sessionId → server-reported isWorking status */
   const serverWorking = ref<Set<string>>(new Set())
+  /** Sessions actively running outside this server (desktop/gateway runs). */
+  const externallyRunning = ref<Set<string>>(new Set())
+  function setSessionExternallyRunning(sessionId: string, running: boolean) {
+    const next = new Set(externallyRunning.value)
+    if (running) next.add(sessionId)
+    else next.delete(sessionId)
+    externallyRunning.value = next
+  }
+  const isSessionExternallyRunning = (sessionId: string | null | undefined) =>
+    sessionId != null && externallyRunning.value.has(sessionId)
   /** Authoritative live delegation counts, never inferred from transcript history. */
   const backgroundPendingBySession = ref<Map<string, number>>(new Map())
   let runtimeGeneration = 0
@@ -1540,7 +1553,7 @@ function createChatState(scopedSessionId?: string) {
   const isStreaming = computed(() => {
     const sid = activeSessionId.value
     if (sid == null) return false
-    return streamStates.value.has(sid) || serverWorking.value.has(sid)
+    return streamStates.value.has(sid) || serverWorking.value.has(sid) || externallyRunning.value.has(sid)
   })
   const isForkPending = computed(() => {
     const sid = activeSessionId.value
@@ -1957,6 +1970,7 @@ function createChatState(scopedSessionId?: string) {
     try {
       const list = await fetchRuntimeSessions(profile ?? sessionProfileFilter.value)
       const incoming = list.map(mapHermesSession)
+      for (const fresh of incoming) setSessionExternallyRunning(fresh.id, !!fresh.externalRunning)
       const existingById = new Map(sessions.value.map(s => [s.id, s]))
       const incomingIds = new Set(incoming.map(s => s.id))
 
@@ -5709,6 +5723,13 @@ function createChatState(scopedSessionId?: string) {
       if (lastMsg?.isStreaming) {
         updateMessage(sid, lastMsg.id, { isStreaming: false })
       }
+      return
+    }
+    // Run owned by another process (desktop/gateway): request a cooperative
+    // cancel through the server's shared run registry.
+    if (externallyRunning.value.has(sid)) {
+      setAbortState(sid, { aborting: true, synced: null })
+      void cancelSessionRun(sid).finally(() => setAbortState(sid, { aborting: false, synced: null }))
     }
   }
 
@@ -5931,6 +5952,19 @@ function createChatState(scopedSessionId?: string) {
     window.dispatchEvent(event)
   }
 
+  // Cross-process run-state sync: react to external-run transitions broadcast
+  // by the server and stream the active desktop run's messages while it grows.
+  onSessionRunExternalChange(changes => {
+    for (const change of changes) setSessionExternallyRunning(change.session_id, change.running)
+  })
+  setInterval(() => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+    const sid = activeSessionId.value
+    if (!sid || !externallyRunning.value.has(sid)) return
+    if (isAborting.value) return
+    void refreshActiveSession({ latest: true }).catch(() => {})
+  }, 4000)
+
   return {
     sessions,
     runtimeMode,
@@ -5939,6 +5973,9 @@ function createChatState(scopedSessionId?: string) {
     focusMessageId,
     messages,
     isStreaming,
+    externallyRunning,
+    isSessionExternallyRunning,
+    setSessionExternallyRunning,
     isForkPending,
     isRunActive,
     isSessionLive,

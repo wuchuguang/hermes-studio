@@ -36,6 +36,7 @@ import {
   invalidateCodingAgentSessionRuntime,
   validateCodingAgentModelEffort,
 } from '../public/session-agent-runtime'
+import { getExternallyRunningSessionIds } from '../services/chat-run/external-run-sync'
 import {
   listSessions as localListSessions,
   countSessions as localCountSessions,
@@ -135,7 +136,6 @@ const LIVE_SESSION_SUMMARY_FIELDS = [
   'billing_provider', 'estimated_cost_usd', 'actual_cost_usd', 'cost_status',
   'started_at', 'ended_at', 'end_reason', 'last_active',
 ] as const
-
 /**
  * A studio-local row for a desktop session is only a snapshot: a bare shadow
  * (createSession always stores message_count 0 / empty preview — e.g. created by
@@ -152,6 +152,11 @@ function refreshSessionSnapshot(session: any, liveById: Map<string, any>): any {
   const refreshed: Record<string, any> = { ...session }
   for (const field of LIVE_SESSION_SUMMARY_FIELDS) refreshed[field] = live[field]
   if (!refreshed.title && live.title) refreshed.title = live.title
+  // Model/provider: state.db is the session's source of truth (the desktop owns
+  // the real value; a local shadow row's model goes stale the moment the user
+  // switches models on the desktop). Never blank a locally-set value with empty.
+  if (live.model) refreshed.model = live.model
+  if (live.provider) refreshed.provider = live.provider
   return refreshed
 }
 
@@ -678,6 +683,14 @@ export async function list(ctx: any) {
       isRequestedSessionSource(source, s.source) &&
       (!knownProfiles || knownProfiles.has(s.profile || 'default')),
     )))
+  // Mark sessions actively running outside this server (desktop/gateway runs),
+  // so the web UI can badge them and offer a cooperative cancel.
+  const externalRunningIds = getExternallyRunningSessionIds()
+  if (externalRunningIds.size > 0) {
+    for (const session of sessions) {
+      if (externalRunningIds.has(session.id)) session.external_running = true
+    }
+  }
   ctx.body = {
     sessions: paginated ? sessions.slice(0, effectiveLimit) : sessions,
     ...(paginated ? {

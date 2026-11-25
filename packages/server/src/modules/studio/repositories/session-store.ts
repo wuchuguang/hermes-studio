@@ -58,6 +58,8 @@ export interface HermesSessionRow {
   history_revision: number
   history_cleared_at?: number
   parent_title?: string | null
+  /** Set by ctrl.list when the session is actively running outside this server. */
+  external_running?: boolean
   parent_last_message?: string | null
   parent_last_message_role?: string | null
 }

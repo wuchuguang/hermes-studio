@@ -859,6 +859,29 @@ export async function findSessionProfileFromDb(sessionId: string): Promise<strin
   return null
 }
 
+/**
+ * Session ids whose latest message lands within `epochSeconds` (unix seconds),
+ * across every profile db. Used by the external-run sync to infer that a
+ * desktop/gateway run is actively appending to a session this server does not
+ * own. One bounded scan per db.
+ */
+export async function listActiveSessionIdsSince(epochSeconds: number, limit = 50): Promise<string[]> {
+  if (!SQLITE_AVAILABLE) return []
+  const { DatabaseSync } = await import('node:sqlite')
+  const ids = new Set<string>()
+  for (const dbPath of candidateSessionDbPaths()) {
+    let db: (SessionLookupDb & { close: () => void }) | null = null
+    try {
+      db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+      const rows = db.prepare('SELECT DISTINCT session_id AS sid FROM messages WHERE timestamp >= ? LIMIT ?')
+        .all(epochSeconds, limit) as Array<{ sid: string }>
+      for (const row of rows) if (row?.sid) ids.add(String(row.sid))
+    } catch { /* skip unreadable db */ }
+    finally { try { db?.close() } catch { /* already closed */ } }
+  }
+  return [...ids]
+}
+
 export async function getSessionMessagesFromDb(sessionId: string): Promise<{
   messages: HermesMessageRow[]
   session: HermesSessionRow | null

@@ -9,6 +9,8 @@ export interface SessionSummary {
   source: string
   agent?: string
   agent_mode?: 'global' | 'scoped' | string
+  /** Session actively running outside this server (desktop/gateway run). */
+  external_running?: boolean
   agent_session_id?: string
   agent_native_session_id?: string
   model: string
@@ -691,6 +693,29 @@ export async function setSessionReasoningEffort(id: string, reasoningEffort: str
     return true
   } catch {
     return false
+  }
+}
+
+export interface SessionRunCancelResult {
+  ok: boolean
+  session_id: string
+  /** true when this server owned the run and aborted it */
+  stopped: boolean
+  /** true when a cooperative cancel request was left for the owning process (desktop) */
+  cancel_requested?: boolean
+  origin?: string | null
+}
+
+/**
+ * Stop a session run regardless of which side started it: locally-running runs
+ * abort immediately; desktop/gateway runs get a cooperative cancel request via
+ * the shared run registry.
+ */
+export async function cancelSessionRun(id: string): Promise<SessionRunCancelResult | null> {
+  try {
+    return await request(`/api/studio/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' }) as SessionRunCancelResult
+  } catch {
+    return null
   }
 }
 

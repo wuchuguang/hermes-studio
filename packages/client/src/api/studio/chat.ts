@@ -871,6 +871,25 @@ function openChatSocket(profile: string, transport: ChatRunTransport): Socket {
   })
 }
 
+/** Sessions actively running outside this server (desktop/gateway runs). */
+export type SessionRunExternalChange = { session_id: string; running: boolean }
+type SessionRunExternalListener = (changes: SessionRunExternalChange[]) => void
+const sessionRunExternalListeners = new Set<SessionRunExternalListener>()
+
+/** Subscribe to cross-process run-state transitions broadcast by the server. */
+export function onSessionRunExternalChange(listener: SessionRunExternalListener): () => void {
+  sessionRunExternalListeners.add(listener)
+  return () => {
+    sessionRunExternalListeners.delete(listener)
+  }
+}
+
+function globalSessionRunExternalHandler(payload: unknown): void {
+  const changes = (payload as { changes?: SessionRunExternalChange[] } | null)?.changes
+  if (!Array.isArray(changes)) return
+  for (const listener of sessionRunExternalListeners) listener(changes)
+}
+
 export function connectChatRun(requestedProfile?: string | null, transport: ChatRunTransport = 'chat-run'): Socket {
   const normalizedRequestedProfile = requestedProfile?.trim() || null
   if (
@@ -917,6 +936,9 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
 
   // Register global listeners only once per socket connection
   if (!globalListenersRegistered) {
+    // Cross-process run-state transitions (desktop/gateway runs)
+    on('session.run.external', globalSessionRunExternalHandler as unknown as (event: RunEvent) => void)
+
     // Message events
     on('message.delta', globalMessageDeltaHandler)
     on('message.interim', globalMessageInterimHandler)

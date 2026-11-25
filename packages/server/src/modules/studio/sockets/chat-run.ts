@@ -89,6 +89,7 @@ import { isPluginAgentId, closePluginAgentSession } from '../services/agents/reg
 import { handleEkkoAgentRun, type EkkoAgentRunSocketData } from '../services/chat-run/handle-ekko-agent-run'
 import { handleEkkoSessionCommand, parseEkkoRunCommand } from '../services/chat-run/ekko-session-command'
 import { handleAbort } from '../services/chat-run/abort'
+import { startExternalRunSync, getExternallyRunningSessionIds } from '../services/chat-run/external-run-sync'
 import { getOrCreateSession } from '../services/chat-run/compression'
 import { loadSessionStateFromDb, resolveRunSource } from '../services/chat-run/load-state'
 import { getSessionContextOverhead, refreshContextUsageAfterDeletion } from '../services/chat-run/context-usage'
@@ -508,6 +509,12 @@ export class ChatRunSocket {
         backgroundPending: owner ? Math.max(backgroundPending, personBackgroundTaskCount(owner, sessionId)) : backgroundPending }
     }, (user, profile) => this.canAccessProfile(user, profile))
     this.stopPersonUpdates = onPersonUpdated(userId => this.syncPersonInteraction(userId))
+    startExternalRunSync({
+      nsp: this.nsp,
+      getSessionMap: () => this.sessionMap,
+      isSessionRunning: (sessionId: string) => this.isSessionRunning(sessionId),
+      abortSession: (sessionId: string, reason: string) => this.abortSession(sessionId, reason),
+    })
     this.stopUsageUpdates = onRunUsageUpdated((sessionId, summary) => {
       const session = getSession(sessionId)
       const isCoding = session && session.agent !== 'ekko-agent' && (session.source === 'coding_agent'
@@ -2480,6 +2487,7 @@ export class ChatRunSocket {
       reasoning_effort: sessionDetail?.reasoning_effort || '',
       push_enabled: Number(sessionDetail?.push_enabled || 0) !== 0,
       isWorking: state.isWorking,
+      external_running: getExternallyRunningSessionIds().has(sid) || undefined,
       runStartedAt: state.runStartedAt,
       isAborting: state.isAborting || false,
       events: personDisplayEvents(sid, buildResumeEvents(resumeEvents.filter(entry =>

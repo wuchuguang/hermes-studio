@@ -193,6 +193,11 @@ const PROVIDER_ALLOWLIST_ENV = 'HERMES_STUDIO_PROVIDER_ALLOWLIST'
 function applyProviderAllowlist(groups: AvailableGroup[]): AvailableGroup[] {
   const raw = process.env[PROVIDER_ALLOWLIST_ENV]
   if (!raw || !raw.trim()) return groups
+  // Custom providers from the profile config's `providers:` section (e.g. a
+  // self-hosted gateway like magpie) are the desktop's primary models — they
+  // bypass the allowlist so the web picker stays aligned with the desktop.
+  const isConfigCustomProvider = (group: AvailableGroup) => group.provider_source === 'providers'
+  const restricted = groups.filter(group => !isConfigCustomProvider(group))
   const entries = raw.split(',').map(s => s.trim()).filter(Boolean)
   const allowedProviders = new Set(entries.filter(e => !e.includes(':')))
   const allowedModelsByProvider = new Map<string, Set<string>>()
@@ -203,7 +208,7 @@ function applyProviderAllowlist(groups: AvailableGroup[]): AvailableGroup[] {
     if (!allowedModelsByProvider.has(provider)) allowedModelsByProvider.set(provider, new Set())
     allowedModelsByProvider.get(provider)!.add(e.slice(sep + 1))
   }
-  return groups
+  const keptRestricted = restricted
     .filter(group => allowedProviders.has(group.provider) || allowedModelsByProvider.has(group.provider))
     .map(group => {
       const models = allowedModelsByProvider.get(group.provider)
@@ -212,7 +217,9 @@ function applyProviderAllowlist(groups: AvailableGroup[]): AvailableGroup[] {
       if (visible.length === 0) return null
       return { ...group, models: visible, available_models: (group.available_models || group.models).filter(m => models.has(m)) }
     })
-    .filter((g): g is AvailableGroup => g !== null)
+    .filter((group): group is AvailableGroup => group !== null)
+  const keptIds = new Set(keptRestricted)
+  return groups.filter(group => isConfigCustomProvider(group) || keptIds.has(group))
 }
 
 function resolveVisibleDefault(defaultModel: string, defaultProvider: string, groups: AvailableGroup[]) {
