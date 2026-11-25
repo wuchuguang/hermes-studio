@@ -618,6 +618,68 @@ const hasToolDetails = computed(
 const isSubagentTool = computed(() => subagentIdFromToolCall(props.message.toolCallId) !== null);
 const hasInlineToolDetails = computed(() => hasToolDetails.value && !isSubagentTool.value);
 
+interface PatchToolSummary {
+  file: string;
+  added: number;
+  removed: number;
+}
+
+function countPatchLines(value: unknown): number {
+  if (typeof value !== "string" || !value.trim()) return 0;
+  return value.replace(/\n+$/, "").split("\n").length;
+}
+
+function shortPath(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  const segments = value.trim().split("/").filter(Boolean);
+  return segments.slice(-2).join("/");
+}
+
+function describePatchToolArgs(args: unknown): PatchToolSummary | null {
+  let value = args;
+  if (typeof value === "string" && value.trim()) {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.patch === "string" && record.patch.trim()) {
+    const files = new Set<string>();
+    let added = 0;
+    let removed = 0;
+    for (const raw of record.patch.split("\n")) {
+      const line = raw.trimEnd();
+      const header = line.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/);
+      if (header) files.add(header[1].trim());
+      else if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
+      else if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
+    }
+    if (!files.size && !added && !removed) return null;
+    const names = [...files];
+    const file =
+      names.length === 1
+        ? shortPath(names[0]) || names[0]
+        : names.slice(0, 2).map((name) => shortPath(name) || name).join(", ") + (names.length > 2 ? " …" : "");
+    return { file: file || "patch", added, removed };
+  }
+  const path = shortPath(record.path ?? record.file_path);
+  if (!path && record.old_string == null && record.new_string == null) return null;
+  return {
+    file: path || "patch",
+    added: countPatchLines(record.new_string),
+    removed: countPatchLines(record.old_string),
+  };
+}
+
+const patchToolSummary = computed<PatchToolSummary | null>(() => {
+  const name = String(props.message.toolName || "");
+  if (name !== "patch" && name !== "apply_patch") return null;
+  return describePatchToolArgs(props.message.toolArgs);
+});
+
 const fullToolArgs = computed(() => toolArgsPayload.value.full);
 const formattedToolArgs = computed(() => toolArgsPayload.value.display);
 const fullToolResult = computed(() => toolResultPayload.value.full);
@@ -927,6 +989,16 @@ onBeforeUnmount(() => {
           class="tool-preview"
           >{{ message.toolPreview }}</span
         >
+        <span
+          v-else-if="patchToolSummary && (!toolExpanded || isSubagentTool)"
+          class="tool-preview tool-patch-preview"
+        >
+          <span class="patch-file">{{ patchToolSummary.file }}</span>
+          <span class="patch-stat">
+            <span class="patch-added">+{{ patchToolSummary.added }}</span>
+            <span class="patch-removed">-{{ patchToolSummary.removed }}</span>
+          </span>
+        </span>
         <span
           v-if="message.toolStatus === 'running'"
           class="tool-spinner"
@@ -1921,6 +1993,31 @@ onBeforeUnmount(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: min(400px, 100%);
+  }
+
+  .tool-patch-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+
+    .patch-file {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .patch-stat {
+      font-size: 11px;
+      opacity: 0.8;
+      font-variant-numeric: tabular-nums;
+
+      .patch-added {
+        color: $success;
+      }
+
+      .patch-removed {
+        color: $error;
+      }
+    }
   }
 
 }
