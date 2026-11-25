@@ -680,6 +680,107 @@ const patchToolSummary = computed<PatchToolSummary | null>(() => {
   return describePatchToolArgs(props.message.toolArgs);
 });
 
+/** Per-tool arg fields for the collapsed two-line tool preview. */
+const TOOL_ARG_KEYS: Array<{ tool: string; primary: string[]; secondary?: string[] }> = [
+  { tool: "terminal", primary: ["command"], secondary: ["workdir"] },
+  { tool: "search_files", primary: ["pattern"], secondary: ["path", "target"] },
+  { tool: "read_file", primary: ["path"], secondary: ["offset", "limit"] },
+  { tool: "write_file", primary: ["path"] },
+  { tool: "skill_view", primary: ["name"], secondary: ["file_path"] },
+  { tool: "skill_manage", primary: ["name"], secondary: ["operations"] },
+  { tool: "memory", primary: ["target"], secondary: ["operations"] },
+  { tool: "delegate_task", primary: ["goal"], secondary: ["subagent_id"] },
+  { tool: "web_search", primary: ["query"], secondary: ["limit"] },
+  { tool: "web_extract", primary: ["urls"] },
+  { tool: "vision_analyze", primary: ["image_url"], secondary: ["question"] },
+  { tool: "cronjob_manage", primary: ["action", "job_id"] },
+  { tool: "tool_search", primary: ["queries"] },
+  { tool: "tool_describe", primary: ["names"] },
+  { tool: "tool_call", primary: ["name"], secondary: ["arguments"] },
+  { tool: "todo_list", primary: ["action", "content"] },
+];
+
+const GENERIC_ARG_KEYS = [
+  "command", "path", "file_path", "pattern", "query", "url",
+  "goal", "prompt", "name", "title", "action",
+];
+
+function firstArgLine(value: string): string {
+  return value.split("\n")[0]?.trim() ?? "";
+}
+
+function truncateArg(value: string, max = 90): string {
+  const line = firstArgLine(value);
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+function stringifyArg(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.length ? `${value.length} items` : "";
+  return `${Object.keys(value as Record<string, unknown>).length} keys`;
+}
+
+function describeGenericToolArgs(
+  toolName: string,
+  args: unknown,
+): { primary: string; secondary?: string } | null {
+  let record: Record<string, unknown> | null = null;
+  if (args && typeof args === "object") record = args as Record<string, unknown>;
+  else if (typeof args === "string" && args.trim()) {
+    try {
+      record = JSON.parse(args) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  const spec = TOOL_ARG_KEYS.find((entry) => entry.tool === toolName);
+  const resolveKeys = (keys?: string[]): string => {
+    if (!record || !keys?.length) return "";
+    for (const key of keys) {
+      const text = stringifyArg(record[key]);
+      if (text) return truncateArg(text);
+    }
+    return "";
+  };
+  let primary = resolveKeys(spec?.primary);
+  let secondary: string | undefined = resolveKeys(spec?.secondary);
+  if (!secondary && toolName === "write_file" && record?.content) {
+    secondary = `${countPatchLines(record.content)}L`;
+  }
+  if (!primary) {
+    for (const key of GENERIC_ARG_KEYS) {
+      const text = stringifyArg(record?.[key]);
+      if (text) {
+        primary = truncateArg(text);
+        break;
+      }
+    }
+  }
+  if (!secondary) {
+    for (const key of ["workdir", "path", "file_path", "target", "profile", "mode", "session_id", "job_id"]) {
+      if (spec?.primary?.includes(key)) continue;
+      const text = stringifyArg(record?.[key]);
+      if (text) {
+        secondary = truncateArg(`${key}=${text}`, 60);
+        break;
+      }
+    }
+  }
+  if (!primary && secondary) {
+    primary = secondary;
+    secondary = undefined;
+  }
+  return primary ? { primary, secondary: secondary || undefined } : null;
+}
+
+const genericToolSummary = computed<{ primary: string; secondary?: string } | null>(() => {
+  const name = String(props.message.toolName || "");
+  if (!name || name === "patch" || name === "apply_patch") return null;
+  return describeGenericToolArgs(name, props.message.toolArgs);
+});
+
 const fullToolArgs = computed(() => toolArgsPayload.value.full);
 const formattedToolArgs = computed(() => toolArgsPayload.value.display);
 const fullToolResult = computed(() => toolResultPayload.value.full);
@@ -998,6 +1099,13 @@ onBeforeUnmount(() => {
             <span class="patch-added">+{{ patchToolSummary.added }}</span>
             <span class="patch-removed">-{{ patchToolSummary.removed }}</span>
           </span>
+        </span>
+        <span
+          v-else-if="genericToolSummary && (!toolExpanded || isSubagentTool)"
+          class="tool-preview tool-args-preview"
+        >
+          <span class="tool-summary-primary">{{ genericToolSummary.primary }}</span>
+          <span v-if="genericToolSummary.secondary" class="tool-summary-secondary">{{ genericToolSummary.secondary }}</span>
         </span>
         <span
           v-if="message.toolStatus === 'running'"
@@ -2017,6 +2125,24 @@ onBeforeUnmount(() => {
       .patch-removed {
         color: $error;
       }
+    }
+  }
+
+  .tool-args-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+
+    .tool-summary-primary {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tool-summary-secondary {
+      font-size: 11px;
+      opacity: 0.7;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   }
 
