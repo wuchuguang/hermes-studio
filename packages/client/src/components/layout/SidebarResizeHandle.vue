@@ -2,7 +2,7 @@
 import { computed, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/hermes/app'
-import { clampSidebarWidth, SIDEBAR_MIN_WIDTH, sidebarMaxWidth } from '@/utils/sidebar-width'
+import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, sidebarMaxWidth } from '@/utils/sidebar-width'
 
 const appStore = useAppStore()
 const { t } = useI18n()
@@ -61,6 +61,10 @@ function resizeWithKeyboard(event: KeyboardEvent) {
   appStore.setSidebarWidth(clampSidebarWidth(next, maxWidth.value))
 }
 
+function resetToDefault() {
+  appStore.setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)
+}
+
 function onViewportResize() {
   viewportWidth.value = window.innerWidth
   stopResize()
@@ -84,6 +88,7 @@ onUnmounted(() => {
     :aria-valuemax="maxWidth"
     :aria-valuenow="width"
     @pointerdown.stop.prevent="startResize"
+    @dblclick.stop.prevent="resetToDefault"
     @lostpointercapture="stopResize"
     @keydown="resizeWithKeyboard"
   />

@@ -54,7 +54,8 @@ defineProps<{ expanded: boolean; navigation?: boolean }>()
     height: auto;
     margin: 0;
     z-index: 120;
-    width: $sidebar-width;
+    // 原生抽屉宽度: 小屏按视口比例收窄, 大屏封顶 280 — 不用桌面拖拽持久化的宽度
+    width: min(64vw, 280px);
 
     &.collapsed { transform: translateX(-100%); opacity: 0; }
   }
