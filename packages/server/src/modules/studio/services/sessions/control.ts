@@ -7,6 +7,7 @@ import { isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-ag
 import { resolveAgentStatusId } from '../agent-availability'
 import { getChatRunServer } from '../../public/chat-run'
 import { requestSessionRunCancel } from '../session-run-registry'
+import { findHermesSessionProfile } from '../../public/session-agent-runtime'
 import { businessEvents } from '../webhooks/business-events'
 import { pluginAgentIsGlobalOnly } from '../agents/registry'
 
@@ -44,8 +45,20 @@ export function createEmptySession(user: AuthenticatedUser | undefined, profile:
   return { session }
 }
 export async function stopSession(user: AuthenticatedUser | undefined, profile: string, id: string) {
-  const session = controlledSession(user, profile, id)
-  if (['workflow', 'group_chat'].includes(session.source)) failure('Stop orchestrated runs through their workflow or group chat', 409)
+  // A desktop-owned session may exist ONLY in a state.db (no studio local row): the
+  // cancel path must still reach the shared run registry for those, so fall back to
+  // resolving the session's owning profile db instead of failing with 404.
+  const session = getSession(id)
+  if (session) {
+    authorizeSessionProfile(user, profile)
+    if (isPrivatePersonSession(id) && !ownsPersonSession(user.id, session)) failure('Session not found', 404)
+    if ((session.profile || 'default') !== profile) failure('Session belongs to another Profile', 403)
+    if (['workflow', 'group_chat'].includes(session.source)) failure('Stop orchestrated runs through their workflow or group chat', 409)
+  } else {
+    const ownerProfile = await findHermesSessionProfile(id)
+    if (!ownerProfile) failure('Session not found', 404)
+    if (ownerProfile !== profile) failure('Session belongs to another Profile', 403)
+  }
   const server = getChatRunServer()
   if (!server) failure('Chat runtime is unavailable', 503)
   const stopped = server.isSessionRunning(id)
