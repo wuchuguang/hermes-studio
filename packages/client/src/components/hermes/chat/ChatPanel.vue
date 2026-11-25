@@ -4390,7 +4390,8 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
     height: auto;
     margin: 0;
     z-index: 120;
-    width: $sidebar-width;
+    // 会话抽屉收窄: 小屏按视口比例, 大屏封顶 224 — 不吃桌面拖拽持久化的宽度
+    width: min(58vw, 224px);
 
     &.collapsed {
       transform: translateX(-100%);

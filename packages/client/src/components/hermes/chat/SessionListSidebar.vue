@@ -54,8 +54,8 @@ defineProps<{ expanded: boolean; navigation?: boolean }>()
     height: auto;
     margin: 0;
     z-index: 120;
-    // 原生抽屉宽度: 小屏按视口比例收窄, 大屏封顶 280 — 不用桌面拖拽持久化的宽度
-    width: min(64vw, 280px);
+    // 与 ChatPanel 的 .session-list mobile 分支保持一致（两处 scoped 规则都会命中根元素）
+    width: min(58vw, 224px);
 
     &.collapsed { transform: translateX(-100%); opacity: 0; }
   }
