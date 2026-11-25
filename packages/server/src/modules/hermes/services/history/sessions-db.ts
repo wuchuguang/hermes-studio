@@ -882,6 +882,29 @@ export async function listActiveSessionIdsSince(epochSeconds: number, limit = 50
   return [...ids]
 }
 
+/**
+ * The session's model per its owning state.db (source of truth — the desktop
+ * writes it on every model switch). '' = session exists with no model;
+ * null = session not found / sqlite unavailable.
+ */
+export async function getSessionModelFromDb(sessionId: string, profile?: string): Promise<string | null> {
+  if (!SQLITE_AVAILABLE) return null
+  const { DatabaseSync } = await import('node:sqlite')
+  const paths = profile
+    ? candidateSessionDbPaths().filter((dbPath) => profileForDbPath(dbPath) === profile)
+    : candidateSessionDbPaths()
+  for (const dbPath of paths) {
+    let db: (SessionLookupDb & { close: () => void }) | null = null
+    try {
+      db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+      const row = db.prepare('SELECT model FROM sessions WHERE id = ?').get(sessionId) as { model?: string | null } | undefined
+      if (row) return String(row.model || '').trim()
+    } catch { /* skip unreadable db */ }
+    finally { try { db?.close() } catch { /* already closed */ } }
+  }
+  return null
+}
+
 export async function getSessionMessagesFromDb(sessionId: string): Promise<{
   messages: HermesMessageRow[]
   session: HermesSessionRow | null

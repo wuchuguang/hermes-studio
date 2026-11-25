@@ -14,6 +14,7 @@ import {
   listSessionSummaries,
   listSessionSummaryGroups,
   findSessionProfileFromDb,
+  getSessionModelFromDb,
 } from '../modules/hermes/services/history/sessions-db'
 import { deleteSessionForProfile, getSession } from '../modules/hermes/services/runtime/cli'
 import { getModelContextLength } from '../modules/hermes/services/models/context'
@@ -36,6 +37,7 @@ configureSessionAgentRuntime({
   getHermesSessionDetailForProfile: getSessionDetailFromDbWithProfile,
   getHermesSessionMessageCount: getSessionMessageCountFromDbWithProfile,
   findHermesSessionProfile: findSessionProfileFromDb,
+  getHermesSessionModel: getSessionModelFromDb,
   getHermesSessionDetailPaginatedForProfile: getSessionDetailPaginatedFromDbWithProfile,
   getExactHermesSessionDetailForProfile: getExactSessionDetailFromDbWithProfile,
   getCompressionContinuation: getCompressionContinuationFromDb,

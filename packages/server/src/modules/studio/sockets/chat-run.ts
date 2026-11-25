@@ -60,11 +60,11 @@ import type { Server, Socket } from 'socket.io'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
-import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent } from '../repositories/session-store'
+import { clearSessionMessages, deleteSession, getSession, getSessionMetadata, listSessions, updateMessageDisplayContent, updateSession } from '../repositories/session-store'
 import { deleteSessionMessageGroups } from '../repositories/session-message-deletion'
 import { listWorkspaceRunChangesForAssistantMessages } from '../repositories/workspace-run-changes-store'
 import { getSessionCategory } from '../repositories/session-category-store'
-import { findHermesSessionProfile, getHermesSessionMessageCount } from '../public/session-agent-runtime'
+import { findHermesSessionProfile, getHermesSessionMessageCount, getHermesSessionModel } from '../public/session-agent-runtime'
 import { getActiveProfileName, getProfileDir, listProfileNamesFromDisk } from '../public/profile-config'
 import {
   getChatCodingAgentMcpServers,
@@ -2433,6 +2433,18 @@ export class ChatRunSocket {
           logger.info('[chat-run-socket] session %s cached state stale (%s < %s), reloading', sid, state.messageTotal, stateCount)
           state = await loadSessionStateFromDb(sid, this.sessionMap)
           this.sessionMap.set(sid, state)
+        }
+        // Model self-heal on the cached path: a desktop model switch does not
+        // necessarily add messages, so the count probe alone can miss it.
+        const liveModel = (await getHermesSessionModel(sid, stateDbProfile)) ?? ''
+        const localModel = String(getSessionMetadata(sid)?.model || '')
+        if (liveModel && liveModel !== localModel) {
+          try {
+            updateSession(sid, { model: liveModel })
+            logger.info('[chat-run-socket] session %s model %s -> %s (state.db truth, cached path)', sid, localModel, liveModel)
+          } catch (healErr) {
+            logger.warn(healErr, '[chat-run-socket] cached-path model heal failed for %s', sid)
+          }
         }
       } catch (refreshErr) {
         logger.warn(refreshErr, '[chat-run-socket] resume freshness check failed for %s', sid)

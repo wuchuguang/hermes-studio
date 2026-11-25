@@ -8,6 +8,7 @@ export interface SessionAgentRuntimeDependencies {
   getHermesSessionMessageCount?: (sessionId: string, profile: string) => Promise<number | null>
   /** Which hermes profile db (root = 'default') owns the session; null if none. */
   findHermesSessionProfile?: (sessionId: string) => Promise<string | null>
+  getHermesSessionModel?: (sessionId: string, profile?: string) => Promise<string | null>
   getHermesSessionDetailPaginatedForProfile: (...args: any[]) => Promise<any>
   getExactHermesSessionDetailForProfile: (...args: any[]) => Promise<any>
   getCompressionContinuation: (sessionId: string, profile?: string) => Promise<{ sessionId: string; title: string | null } | null>
@@ -39,6 +40,7 @@ export const getHermesSessionDetail = (...args: any[]): Promise<any> => configur
 export const getHermesSessionDetailForProfile = (...args: any[]): Promise<any> => configured().getHermesSessionDetailForProfile(...args)
 export const getHermesSessionMessageCount = (sessionId: string, profile: string): Promise<number | null> => configured().getHermesSessionMessageCount?.(sessionId, profile) ?? Promise.resolve(null)
 export const findHermesSessionProfile = (sessionId: string): Promise<string | null> => configured().findHermesSessionProfile?.(sessionId) ?? Promise.resolve(null)
+export const getHermesSessionModel = (sessionId: string, profile?: string): Promise<string | null> => configured().getHermesSessionModel?.(sessionId, profile) ?? Promise.resolve(null)
 export const getHermesSessionDetailPaginatedForProfile = (...args: any[]): Promise<any> => configured().getHermesSessionDetailPaginatedForProfile(...args)
 export const getExactHermesSessionDetailForProfile = (...args: any[]): Promise<any> => configured().getExactHermesSessionDetailForProfile(...args)
 export const getCompressionContinuation = (sessionId: string, profile?: string) => configured().getCompressionContinuation(sessionId, profile)

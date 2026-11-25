@@ -2,6 +2,7 @@ import { isNativeCodingAgent } from '../../contracts/agents/native-coding-agents
 import {
   getSession,
   getSessionDetailPaginated,
+  updateSession,
   type PaginatedSessionDetailResult,
 } from '../../repositories/session-store'
 import { findSessionProfileFromDb, getSessionDetailPaginatedFromDbWithProfile } from '../../../hermes/services/history/sessions-db'
@@ -112,6 +113,19 @@ const readSessionStateFromDbAsync = async (sid: string): Promise<SessionState> =
     }
 
     const messages = actualDetail?.messages ? handleMessage(actualDetail.messages, sid) : []
+    // Self-heal the local row's model from the authoritative session row: a
+    // phone-created shadow row's model goes stale the moment the user switches
+    // models on the desktop, and the resume payload serves this row verbatim.
+    const liveModel = String(actualDetail?.session?.model || '').trim()
+    const healedLocalRow = liveModel ? getSession(sid) : null
+    if (liveModel && healedLocalRow && healedLocalRow.model !== liveModel) {
+      try {
+        updateSession(sid, { model: liveModel })
+        logger.info('[chat-run-socket] session %s model %s -> %s (state.db truth)', sid, healedLocalRow.model, liveModel)
+      } catch (healErr) {
+        logger.warn(healErr, '[chat-run-socket] model self-heal failed for %s', sid)
+      }
+    }
     const displayElapsedMs = Date.now() - displayStartedAt
     const displayPayload = {
       sessionId: sid,
