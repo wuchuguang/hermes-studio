@@ -14,9 +14,11 @@
  * until its side lands, desktop runs are detected via the growth heuristic only,
  * and a web cancel is delivered as a registry cancel request.
  */
+import { randomUUID } from 'crypto'
 import { logger } from '../../public/logging'
 import {
   acknowledgeSessionRunCancel,
+  cancelAimsAtCurrentRun,
   clearSessionRun,
   freshSessionRunEntries,
   heartbeatSessionRun,
@@ -39,6 +41,7 @@ interface ExternalRunSyncDeps {
 
 let syncTimer: ReturnType<typeof setInterval> | null = null
 let lastRunningIds = new Set<string>()
+let lastWorkingIds = new Set<string>()
 let heuristicActiveIds = new Set<string>()
 
 /** Sessions running outside this server (foreign registry entries + activity heuristic). */
@@ -69,13 +72,25 @@ export function stopExternalRunSync(): void {
 async function runTick(deps: ExternalRunSyncDeps, tick: number): Promise<void> {
   const sessionMap = deps.getSessionMap()
 
-  // 1) Heartbeat own runs.
+  // 1) Heartbeat own runs. A not-working → working transition is a NEW run: publish a
+  // fresh identity so cancel targeting can never bleed across run boundaries.
+  const workingNow = new Set<string>()
   for (const [sessionId, state] of sessionMap) {
     const working = !!(state as { isWorking?: boolean } | undefined)?.isWorking
     if (!working) continue
-    if (freshSessionRunEntries(ENTRY_FRESH_MS)[sessionId]) heartbeatSessionRun(sessionId)
-    else markSessionRunStarted(sessionId, undefined, 'studio')
+    workingNow.add(sessionId)
+    if (!lastWorkingIds.has(sessionId)) {
+      markSessionRunStarted(sessionId, randomUUID(), 'studio')
+    } else if (freshSessionRunEntries(ENTRY_FRESH_MS)[sessionId]) {
+      heartbeatSessionRun(sessionId)
+    } else {
+      markSessionRunStarted(sessionId, randomUUID(), 'studio')
+    }
   }
+  for (const sessionId of lastWorkingIds) {
+    if (!workingNow.has(sessionId)) lastWorkingIds.delete(sessionId)
+  }
+  lastWorkingIds = workingNow
 
   const registry = freshSessionRunEntries(ENTRY_FRESH_MS * 6)
 
@@ -88,6 +103,8 @@ async function runTick(deps: ExternalRunSyncDeps, tick: number): Promise<void> {
   for (const [sessionId, entry] of Object.entries(registry)) {
     if (entry.origin !== 'studio' || !entry.cancel_requested_at || entry.cancel_acknowledged_at) continue
     if (!deps.isSessionRunning(sessionId)) continue
+    // Run-targeting guard: a cancel stamped against a PREVIOUS run must not kill this one.
+    if (!cancelAimsAtCurrentRun(entry)) continue
     logger.info('[external-run-sync] honoring cancel request for session %s', sessionId)
     await deps.abortSession(sessionId, 'Cancelled from another client').catch(() => {})
     acknowledgeSessionRunCancel(sessionId)

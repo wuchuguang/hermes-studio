@@ -27,6 +27,8 @@ export interface SessionRunEntry {
   started_at: number
   heartbeat_at: number
   cancel_requested_at?: number
+  /** Which run_id the cancel request was stamped against (run-targeting guard). */
+  cancel_run_id?: string
   cancel_acknowledged_at?: number
   inferred?: boolean
 }
@@ -76,15 +78,18 @@ function mutateSessionRunRegistry<T>(mutator: (registry: SessionRunRegistry) => 
 export function markSessionRunStarted(sessionId: string, runId: string | undefined, origin: SessionRunOrigin = 'studio', inferred = false): void {
   const now = Date.now()
   mutateSessionRunRegistry((registry) => {
-    registry[sessionId] = {
-      ...(registry[sessionId] || {}),
-      run_id: runId || registry[sessionId]?.run_id,
+    // Always a FRESH entry: this is only called at run start (the sync loop detects the
+    // not-working → working transition), so inheriting a previous run's cancel state here
+    // would let a stale cancel request kill the new run.
+    const entry: SessionRunEntry = {
+      run_id: runId,
       origin,
       pid: process.pid,
-      started_at: registry[sessionId]?.started_at && registry[sessionId]?.origin === origin ? registry[sessionId].started_at : now,
+      started_at: now,
       heartbeat_at: now,
-      ...(inferred ? { inferred: true } : {}),
     }
+    if (inferred) entry.inferred = true
+    registry[sessionId] = entry
   })
 }
 
@@ -107,15 +112,28 @@ export function clearSessionRun(sessionId: string, origin?: SessionRunOrigin): v
   })
 }
 
-/** Stamp a cooperative cancel request on a fresh run entry; null when nothing is running. */
+/** Stamp a cooperative cancel request on a fresh run entry; null when nothing is running.
+ *  Records `cancel_run_id` so the owner can tell a cancel aimed at the CURRENT run from a
+ *  stale one that survived on the entry past a run boundary (cooperative-cancel race). */
 export function requestSessionRunCancel(sessionId: string, freshMs = 15000): SessionRunEntry | null {
   const now = Date.now()
   return mutateSessionRunRegistry((registry) => {
     const entry = registry[sessionId]
     if (!entry || now - entry.heartbeat_at > freshMs) return null
-    if (!entry.cancel_requested_at) entry.cancel_requested_at = now
+    if (!entry.cancel_requested_at) {
+      entry.cancel_requested_at = now
+      entry.cancel_run_id = entry.run_id
+    }
     return { ...entry }
   })
+}
+
+/** True when a stamped cancel request targets the entry's CURRENT run. Entries without
+ *  `cancel_run_id` predate run targeting (older web build) and are honored as-is. */
+export function cancelAimsAtCurrentRun(entry: SessionRunEntry): boolean {
+  if (!entry.cancel_requested_at) return false
+  if (!entry.cancel_run_id || !entry.run_id) return true
+  return entry.cancel_run_id === entry.run_id
 }
 
 export function acknowledgeSessionRunCancel(sessionId: string): void {
