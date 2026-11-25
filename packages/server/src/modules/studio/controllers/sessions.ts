@@ -123,6 +123,37 @@ function filterArchivedSessions<T extends { is_archived?: number | boolean | nul
   return items.filter(item => !isArchivedSession(item))
 }
 
+/**
+ * Summary fields describing the conversation itself — as opposed to studio-side
+ * settings (pin/category/push, model + reasoning choice, source, workspace),
+ * which always stay as the local row has them.
+ */
+const LIVE_SESSION_SUMMARY_FIELDS = [
+  'preview', 'message_count', 'tool_call_count',
+  'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'reasoning_tokens',
+  'billing_provider', 'estimated_cost_usd', 'actual_cost_usd', 'cost_status',
+  'started_at', 'ended_at', 'end_reason', 'last_active',
+] as const
+
+/**
+ * A studio-local row for a desktop session is only a snapshot: a bare shadow
+ * (createSession always stores message_count 0 / empty preview — e.g. created by
+ * a settings change on the phone) or an older sync. Without this the snapshot
+ * shadows the live session in the Chat list (0 messages, no preview, frozen
+ * time). Refresh the live fields from state.db once it has grown past the
+ * snapshot — the same rule the detail/resume paths use to prefer state.db, and
+ * deliberately conservative so a Web UI run (local store authoritative) is
+ * never overwritten by a lagging state.db count.
+ */
+function refreshSessionSnapshot(session: any, liveById: Map<string, any>): any {
+  const live = liveById.get(session.id)
+  if (!live || Number(live.message_count || 0) <= Number(session.message_count || 0)) return session
+  const refreshed: Record<string, any> = { ...session }
+  for (const field of LIVE_SESSION_SUMMARY_FIELDS) refreshed[field] = live[field]
+  if (!refreshed.title && live.title) refreshed.title = live.title
+  return refreshed
+}
+
 function requestedProfile(ctx: any): string | undefined {
   const value = ctx.state?.profile?.name || (typeof ctx.query?.profile === 'string' ? ctx.query.profile.trim() : '')
   return value || undefined
@@ -627,9 +658,14 @@ export async function list(ctx: any) {
   if (!source && isHermesAgentAvailable()) {
     try {
       const hermesSessions = await listHermesSessionSummaries(undefined, effectiveLimit, profile)
-      const localIds = new Set(allSessions.map((session: any) => session.id))
-      const external = hermesSessions
+      const liveById = new Map<string, any>(hermesSessions
         .filter((session: any) => ['desktop', 'local', 'gui'].includes(session.source))
+        .map((session: any) => [session.id, session]))
+      // Local rows that are only snapshots of a live desktop session come first,
+      // then the desktop sessions that have no local row at all.
+      allSessions = allSessions.map((session: any) => refreshSessionSnapshot(session, liveById))
+      const localIds = new Set(allSessions.map((session: any) => session.id))
+      const external = [...liveById.values()]
         .filter((session: any) => !localIds.has(session.id))
         .map((session: any) => ({ ...session, webui_imported: false }))
       if (external.length > 0) allSessions = [...allSessions, ...external]
