@@ -28,6 +28,7 @@ import {
   type PrimaryAgentBridgeRunResult as AgentBridgeRunResult,
 } from '../../public/chat-agent-runtime'
 import { logger } from '../../public/logging'
+import { logicalModelSelection } from '../../public/model-routing'
 import { truncateToolResultForContext } from '../chat-run/tool-result-context'
 import { estimateUsageTokensFromMessages } from '../chat-run/usage'
 import {
@@ -36,6 +37,7 @@ import {
   deleteCompressionSnapshot,
 } from '../../repositories/compression-snapshot'
 import type { ChatContentBlock, ChatMessage } from '../../contracts/runs/messages'
+import type { CompressionSummaryInput } from '../../contracts/plugins'
 
 export type { ChatMessage } from '../../contracts/runs/messages'
 
@@ -69,7 +71,7 @@ export interface CompressedResult {
   meta: {
     totalMessages: number
     compressed: boolean
-    /** true = actually called LLM to summarize; false = assembled from existing snapshot or returned as-is */
+    /** true = generated a new summary; false = assembled from existing snapshot or returned as-is */
     llmCompressed: boolean
     summaryTokenEstimate: number
     verbatimCount: number
@@ -582,20 +584,23 @@ async function callEkkoSummarizer(
   timeoutMs: number,
   options: SummarizerOptions & { profile: string },
 ): Promise<string> {
-  const model = String(options.model || '').trim()
-  const provider = String(options.provider || '').trim()
-  if (!model || !provider) throw new Error('Ekko summarization requires a model and provider')
+  const requestedModel = String(options.model || '').trim()
+  const requestedProvider = String(options.provider || '').trim()
+  if (!requestedModel || !requestedProvider) throw new Error('Ekko summarization requires a model and provider')
 
   const runtimeConfig = await resolveEkkoProviderRuntimeConfig({
     profile: options.profile,
-    provider,
-    model,
+    provider: requestedProvider,
+    model: requestedModel,
     baseUrl: upstream,
     apiKey,
     apiMode: String(options.apiMode || '').trim() || undefined,
   })
+  // Runtime resolution imports the account's routes first. Older auxiliary
+  // settings can still contain Hermes' projected gateway provider/model pair.
+  const { provider, model } = logicalModelSelection(options.profile, runtimeConfig.provider, requestedModel)
   const { providerConfig } = resolveModelProviderConfigs({
-    provider: runtimeConfig.provider,
+    provider,
     baseUrl: runtimeConfig.baseUrl,
     apiKey: runtimeConfig.apiKey,
     model,
@@ -723,13 +728,40 @@ async function callHermesSummarizer(
 
 // ─── Main Compressor ────────────────────────────────────
 
+type Summarize = (
+  input: Omit<CompressionSummaryInput, 'history'>,
+  messages: readonly ChatMessage[],
+) => Promise<string | null>
+
 export class ChatContextCompressor {
   private config: CompressionConfig
+  private readonly summarize?: Summarize
 
   constructor(opts?: {
     config?: Partial<CompressionConfig>
+    summarize?: Summarize
   }) {
     this.config = { ...DEFAULT_COMPRESSION_CONFIG, ...opts?.config }
+    this.summarize = opts?.summarize
+  }
+
+  private async generateSummary(
+    upstream: string,
+    apiKey: string | undefined,
+    prompt: string,
+    source: { transcript: string; messages: readonly ChatMessage[] },
+    previousSummary: string | undefined,
+    options?: string | SummarizerOptions,
+  ): Promise<string> {
+    if (this.summarize) {
+      const summary = await this.summarize({
+        transcript: source.transcript,
+        ...(previousSummary === undefined ? {} : { previousSummary }),
+        summaryBudget: this.config.summaryBudget,
+      }, source.messages)
+      if (summary !== null) return summary
+    }
+    return callSummarizer(upstream, apiKey, prompt, [], this.config.summarizationTimeoutMs, previousSummary, options)
   }
 
   /**
@@ -904,7 +936,9 @@ export class ChatContextCompressor {
       const prompt = buildIncrementalPrompt(previousSummary, contentToSummarize, this.config.summaryBudget)
 
       const t0 = Date.now()
-      summary = await callSummarizer(upstream, apiKey, prompt, [], this.config.summarizationTimeoutMs, previousSummary, summarizer)
+      summary = await this.generateSummary(upstream, apiKey, prompt, {
+        transcript: contentToSummarize, messages: toCompress,
+      }, previousSummary, summarizer)
       logger.info('[context-compressor] incremental-llm done in %dms, %d chars', Date.now() - t0, summary.length)
     } catch (err: any) {
       if (force || resummarize) throw err
@@ -1021,7 +1055,9 @@ export class ChatContextCompressor {
     let summary: string | null = null
     try {
       const t0 = Date.now()
-      summary = await callSummarizer(upstream, apiKey, prompt, [], this.config.summarizationTimeoutMs, undefined, summarizer)
+      summary = await this.generateSummary(upstream, apiKey, prompt, {
+        transcript: contentToSummarize, messages: toCompress,
+      }, undefined, summarizer)
       logger.info('[context-compressor] full-llm done in %dms, %d chars', Date.now() - t0, summary.length)
     } catch (err: any) {
       if (typeof summarizer === 'object' && summarizer.force) throw err

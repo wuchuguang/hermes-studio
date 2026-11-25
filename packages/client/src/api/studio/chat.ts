@@ -59,6 +59,8 @@ export interface StartRunResponse {
 
 // SSE event types from /v1/runs/{id}/events
 export interface RunEvent {
+  personFlows?: import('../person').PersonFlowSnapshot
+  person_task_return?: import('../person').PersonTaskReturn
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   event: string
   run_id?: string
@@ -83,6 +85,7 @@ export interface RunEvent {
   name?: string
   preview?: string
   timestamp?: number
+  notification_id?: string
   error?: string
   /** Final response text on `run.completed`. May be empty/null if the agent
    * silently swallowed an upstream error — see chat store for fallback. */
@@ -96,6 +99,7 @@ export interface RunEvent {
     output_tokens: number
     total_tokens: number
   }
+  session_source?: string
   /** session_id tag added by server for client-side filtering */
   session_id?: string
   /** Generated session title from session.title.updated. */
@@ -166,6 +170,7 @@ export interface RunEvent {
 }
 
 export interface ResumeSessionPayload {
+  personFlows?: import('../person').PersonFlowSnapshot
   taskPlans?: TaskPlanSnapshot[]
   session_id: string
   messages: any[]
@@ -260,10 +265,17 @@ const sessionEventHandlers = new Map<string, {
 
 const peerUserMessageHandlers = new Set<(event: RunEvent) => void>()
 const sessionCommandHandlers = new Set<(event: RunEvent) => void>()
+const unobservedRunStartedHandlers = new Set<(event: RunEvent) => void>()
+const personUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionTitleUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionWorkspaceUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const sessionSettingsUpdatedHandlers = new Set<(event: RunEvent) => void>()
 const runUsageUpdatedHandlers = new Set<(event: RunEvent) => void>()
+
+export function onUnobservedRunStarted(handler: (event: RunEvent) => void): () => void {
+  unobservedRunStartedHandlers.add(handler)
+  return () => { unobservedRunStartedHandlers.delete(handler) }
+}
 
 export function onRunUsageUpdated(handler: (event: RunEvent) => void): () => void {
   runUsageUpdatedHandlers.add(handler)
@@ -387,6 +399,9 @@ function globalSubagentEventHandler(event: RunEvent): void {
 function globalRunStartedHandler(event: RunEvent): void {
   const sid = event.session_id
   if (!sid) return
+  if (!sessionEventHandlers.has(sid)) {
+    for (const handler of unobservedRunStartedHandlers) handler(event)
+  }
 
   const handlers = sessionEventHandlers.get(sid)
   if (handlers?.onRunStarted) {
@@ -728,6 +743,11 @@ export function onSessionCommand(handler: (event: RunEvent) => void): () => void
   }
 }
 
+export function onPersonUpdated(handler: (event: RunEvent) => void): () => void {
+  personUpdatedHandlers.add(handler)
+  return () => { personUpdatedHandlers.delete(handler) }
+}
+
 export function onSessionTitleUpdated(handler: (event: RunEvent) => void): () => void {
   sessionTitleUpdatedHandlers.add(handler)
   return () => {
@@ -754,12 +774,67 @@ export function respondClarify(
   clarifyId: string,
   response: string,
   transport: ChatRunTransport = 'chat-run',
-): void {
-  const socket = connectChatRun(null, transport)
-  socket.emit('clarify.respond', {
-    session_id: sessionId,
-    clarify_id: clarifyId,
-    response,
+  profile?: string,
+): Promise<void> {
+  return respondPendingInteraction('clarify', sessionId, clarifyId, { response }, transport, profile)
+}
+
+function respondPendingInteraction(
+  kind: 'clarify' | 'approval',
+  sessionId: string,
+  requestId: string,
+  response: { response: string } | { choice: string },
+  transport: ChatRunTransport,
+  profile?: string,
+): Promise<void> {
+  // A background Profile's reply must not replace the active conversation's socket.
+  const separate = transport === 'chat-run' && !!profile && !!chatRunSocket
+    && (chatRunSocketTransport !== transport || chatRunSocketProfile !== profile)
+  const socket = separate ? openChatSocket(profile, transport) : connectChatRun(profile, transport)
+  const label = kind === 'approval' ? 'Approval' : 'Clarification'
+  const resolutionEvents = [`${kind}.resolved`, `person.${kind === 'approval' ? 'approval' : 'clarification'}.resolved`]
+  // Resolution events work through local and relayed transports. An emit alone
+  // only queues a packet and must never be treated as an accepted answer.
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      removeSocketListener(socket, 'connect', send)
+      removeSocketListener(socket, 'connect_error', failed)
+      removeSocketListener(socket, 'disconnect', failed)
+      for (const event of resolutionEvents) removeSocketListener(socket, event, resolved)
+      stopAuth?.()
+      if (separate) socket.disconnect()
+      error ? reject(error) : resolve()
+    }
+    const failed = () => finish(new Error(`${label} response could not be delivered. Please retry.`))
+    const resolved = (event: RunEvent & { clarify_id?: string; approval_id?: string; choice?: string; resolved?: boolean; stale?: boolean; outcome?: string }) => {
+      if (event.session_id !== sessionId || event[`${kind}_id`] !== requestId) return
+      if (event.stale || ['timeout', 'timed_out', 'cancelled', 'aborted'].includes(event.reason || event.outcome || '')) {
+        finish(new Error(`${label} has expired.`))
+      } else if (event.resolved === false) {
+        finish(new Error(event.error || `${label} response could not be applied.`))
+      } else if ('choice' in response && event.choice && event.choice !== response.choice) {
+        finish(new Error('Approval has expired.'))
+      } else {
+        finish()
+      }
+    }
+    const send = () => {
+      removeSocketListener(socket, 'connect', send)
+      socket.emit(`${kind}.respond`, { session_id: sessionId, [`${kind}_id`]: requestId, ...response })
+    }
+    const stopAuth = separate ? onAuthInvalidated(failed) : undefined
+    const timer = setTimeout(() => finish(new Error(`${label} response was not confirmed. Please retry.`)), 15_000)
+    for (const event of resolutionEvents) socket.on(event, resolved)
+    socket.on('disconnect', failed)
+    socket.on('connect_error', failed)
+    // Wait outside Socket.IO's send buffer so a timed-out answer cannot be
+    // delivered unexpectedly after the user has already retried or left.
+    if (socket.connected) send()
+    else socket.on('connect', send)
   })
 }
 
@@ -768,13 +843,9 @@ export function respondToolApproval(
   approvalId: string,
   choice: 'once' | 'session' | 'always' | 'deny',
   transport: ChatRunTransport = 'chat-run',
-): void {
-  const socket = connectChatRun(null, transport)
-  socket.emit('approval.respond', {
-    session_id: sessionId,
-    approval_id: approvalId,
-    choice,
-  })
+  profile?: string,
+): Promise<void> {
+  return respondPendingInteraction('approval', sessionId, approvalId, { choice }, transport, profile)
 }
 
 export function getChatRunSocket(transport?: ChatRunTransport): Socket | null {
@@ -782,10 +853,28 @@ export function getChatRunSocket(transport?: ChatRunTransport): Socket | null {
   return chatRunSocket
 }
 
+function openChatSocket(profile: string, transport: ChatRunTransport): Socket {
+  const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
+  const endpoint = socketEndpoint(getBaseUrlValue(), namespace)
+  return io(endpoint.url, {
+    forceNew: true,
+    path: endpoint.path,
+    auth: { token: getApiKey() },
+    query: { profile },
+    transports: ['websocket', 'polling'],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
+    randomizationFactor: 0.5,
+    timeout: 30000,
+  })
+}
+
 export function connectChatRun(requestedProfile?: string | null, transport: ChatRunTransport = 'chat-run'): Socket {
   const normalizedRequestedProfile = requestedProfile?.trim() || null
   if (
-    chatRunSocket?.connected &&
+    chatRunSocket && (chatRunSocket.connected || chatRunSocket.active) &&
     chatRunSocketTransport === transport &&
     (!normalizedRequestedProfile || chatRunSocketProfile === normalizedRequestedProfile)
   ) {
@@ -799,9 +888,6 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
     globalListenersRegistered = false
     chatRunSocketProfile = null
   }
-
-  const baseUrl = getBaseUrlValue()
-  const token = getApiKey()
 
   // Get active profile from store (authoritative source)
   let profile = normalizedRequestedProfile || 'default'
@@ -818,19 +904,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
   chatRunSocketProfile = profile
   chatRunSocketTransport = transport
 
-  const namespace = transport === 'global-agent' ? '/global-agent' : '/chat-run'
-  chatRunSocket = io(socketEndpoint(baseUrl, namespace).url, {
-    path: socketEndpoint(baseUrl, namespace).path,
-    auth: { token },
-    query: { profile },
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 1000,
-    reconnectionDelayMax: 30000,
-    randomizationFactor: 0.5,
-    timeout: 30000,
-  })
+  chatRunSocket = openChatSocket(profile, transport)
 
   // Retained callbacks from a replaced/invalidated socket must not dispatch
   // into handlers registered by a later authenticated session.
@@ -876,6 +950,11 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
     on('run.peer_user_message', globalPeerUserMessageHandler)
     on('clarify.requested', globalClarifyRequestedHandler)
     on('clarify.resolved', globalClarifyResolvedHandler)
+    for (const event of ['run.completed', 'run.failed', 'approval.requested', 'approval.resolved', 'clarification.requested', 'clarification.resolved']) {
+      on(`person.${event}`, data => globalPeerUserMessageHandler({ ...data,
+        event: event.startsWith('clarification.') ? event.replace('clarification.', 'clarify.')
+          : event.startsWith('run.') ? `person.${event}` : event }))
+    }
 
     // Compression events
     on('compression.started', globalCompressionStartedHandler)
@@ -886,6 +965,7 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
 
     // Usage and task-plan events
     on('usage.updated', globalUsageUpdatedHandler)
+    on('person.updated', event => { for (const handler of personUpdatedHandlers) handler(event) })
     on('run.usage.updated', globalRunUsageUpdatedHandler)
     on('plan.updated', globalAgentEventHandler)
     on('agent.event', globalAgentEventHandler)

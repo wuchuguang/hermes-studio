@@ -1,3 +1,5 @@
+import { withSocketProviderAccount } from '../../public/provider-account'
+import { studioModelReasoningEffort } from '../../public/model-reasoning-effort'
 import { studioSessionAccount } from '../../contracts/runs/usage'
 import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '../../contracts/agents/native-coding-agents'
 import { codingAgentId } from './types'
@@ -57,7 +59,7 @@ export interface CodingAgentRunSocketData {
   group_agent_id?: string
 }
 
-export async function handleCodingAgentRun(
+async function handleCodingAgentRunImpl(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
   data: CodingAgentRunSocketData,
@@ -105,7 +107,10 @@ export async function handleCodingAgentRun(
   const launchProvider = data.provider || (mode === 'scoped' ? storedSession?.provider || undefined : undefined)
   const launchModel = data.model ?? (storedSession?.model || undefined)
   const launchApiMode = data.apiMode || data.api_mode || (mode === 'scoped' ? storedSession?.api_mode || undefined : undefined)
-  const launchReasoningEffort = data.reasoning_effort ?? (storedSession?.reasoning_effort || undefined)
+  const selectedReasoningEffort = data.reasoning_effort ?? (storedSession?.reasoning_effort || undefined)
+  const launchReasoningEffort = mode === 'global' ? selectedReasoningEffort : studioModelReasoningEffort({
+    provider: launchProvider, model: launchModel, baseUrl: data.baseUrl || data.base_url, reasoningEffort: selectedReasoningEffort,
+  })
   const groupSystemPrompt = String(data.group_system_prompt || '').trim()
   const groupRoomId = String(data.group_room_id || '').trim()
   const groupAgentId = String(data.group_agent_id || '').trim()
@@ -184,7 +189,7 @@ export async function handleCodingAgentRun(
         : (includeBaseSystemPrompt ? getSystemPrompt(undefined, { source: data.session_source || data.source, mcpCapabilities }) : ''),
       String(data.instructions || '').trim() === groupSystemPrompt ? '' : String(data.instructions || '').trim(),
     ].filter(Boolean).join('\n')
-    const plannedInput = withTaskPlanTurnContext(codingInput.text, taskPlanContext) as string
+    const plannedInput = withTaskPlanTurnContext(codingInput.text, taskPlanContext, !['group_chat', 'workflow', 'global_agent'].includes(data.session_source || data.source || '')) as string
     const runtimeInput = interactionContext
       ? `${plannedInput}\n\n${clarificationTurnInstruction(interactionContext)}`
       : plannedInput
@@ -219,3 +224,5 @@ export async function handleCodingAgentRun(
     throw err
   }
 }
+
+export const handleCodingAgentRun = withSocketProviderAccount(handleCodingAgentRunImpl)

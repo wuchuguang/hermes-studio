@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import type { ChatCodingAgentId } from '@/api/coding-agents'
+import { agentMetadata, agentSupportsSurface } from '@/utils/agent-catalog'
+
 import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import NativeCodingAgentModelFields from '@/components/hermes/models/NativeCodingAgentModelFields.vue'
 import ScopedModelSelector from '@/components/hermes/models/ScopedModelSelector.vue'
 import type { CodingAgentId } from '@/api/coding-agents'
-import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
+import { isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageSidebar from "@/components/layout/PageSidebar.vue"
 import SidebarResizeHandle from "@/components/layout/SidebarResizeHandle.vue"
 import { usePageSidebarState } from "@/composables/usePageSidebar"
@@ -90,9 +93,9 @@ import { buildRemoteGroupChatRooms, type RemoteGroupChatRoom } from '@/utils/gro
 import { handoffErrorTranslationKey } from './handoff-presentation'
 import { clearGroupChatRoomDraft } from './group-chat-room-drafts'
 import {
-    fetchAgentStatusSnapshot,
-    isAgentStatusAvailable,
-    type AgentStatusSnapshot,
+    fetchAgentAvailabilitySnapshot,
+    isAgentAvailable,
+    type AgentAvailabilitySnapshot,
 } from '@/api/agent-status'
 
 const FilesPanel = defineAsyncComponent(async () => (await import('@/components/hermes/chat/FilesPanel.vue')).default)
@@ -137,7 +140,7 @@ const editingAgent = ref<RoomAgent | null>(null)
 const isSavingAgent = ref(false)
 const isLoadingAgentForm = ref(false)
 let agentDrawerLoadSequence = 0
-const agentStatusSnapshot = ref<AgentStatusSnapshot | null>(null)
+const agentAvailabilitySnapshot = ref<AgentAvailabilitySnapshot | null>(null)
 let agentStatusRequest: Promise<void> | null = null
 const showRoomSettingsModal = ref(false)
 const showUserProfileModal = ref(false)
@@ -252,18 +255,18 @@ const profileOptions = computed(() =>
     profilesStore.profiles.map(p => ({ label: p.name, value: p.name }))
 )
 
-type GroupAgentType = 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+type GroupAgentType = `plugin:${string}/${string}` | 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
 
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
 
 const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option =>
-    isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
+    isAgentAvailable(agentAvailabilitySnapshot.value, option.value) && agentSupportsSurface(option.value, 'group-chat')
 ))
 
 const firstAvailableGroupAgentType = computed<GroupAgentType | null>(() =>
     groupAgentTypeOptions.value[0]?.value || null
 )
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => Boolean(agentMetadata(selectedAgentType.value)?.modes.includes('global')) || ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const nativeAgentSelections = ref<Record<string, { model: string; reasoningEffort: string }>>({})
 const nativeAgentId = computed(() => (selectedAgentType.value === 'claude' ? 'claude-code' : selectedAgentType.value) as CodingAgentId)
@@ -285,7 +288,7 @@ function groupAgentDisplayName(agent: GroupAgentType): string {
 }
 
 function isGroupAgentAvailable(agent: GroupAgentType): boolean {
-    return isAgentStatusAvailable(agentStatusSnapshot.value, agent)
+    return isAgentAvailable(agentAvailabilitySnapshot.value, agent)
 }
 
 function warnAgentUnavailable(agent: GroupAgentType) {
@@ -296,9 +299,9 @@ function refreshAgentAvailability(): Promise<void> {
     if (agentStatusRequest) return agentStatusRequest
     agentStatusRequest = (async () => {
         try {
-            agentStatusSnapshot.value = await fetchAgentStatusSnapshot()
+            agentAvailabilitySnapshot.value = await fetchAgentAvailabilitySnapshot()
         } catch {
-            agentStatusSnapshot.value = null
+            agentAvailabilitySnapshot.value = null
         }
     })().finally(() => { agentStatusRequest = null })
     return agentStatusRequest
@@ -309,19 +312,7 @@ function getAgentModelGroups(profile: string) {
         .filter((group) => {
             if (group.provider === 'moa') return selectedAgentType.value === 'hermes'
             if (selectedAgentType.value === 'hermes') return true
-            const codingAgentId = selectedAgentType.value === 'ekko'
-                ? 'ekko-agent'
-                : selectedAgentType.value === 'claude'
-                    ? 'claude-code'
-                    : selectedAgentType.value === 'pi'
-                        ? 'pi'
-                        : selectedAgentType.value === 'grok'
-                            ? 'grok'
-                            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
-                                ? 'cursor'
-                            : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
-                                ? 'opencode'
-                            : 'codex'
+            const codingAgentId = (agentMetadata(selectedAgentType.value)?.id || selectedAgentType.value) as ChatCodingAgentId
             return canScopedCodingAgentUseProvider(codingAgentId, group.provider)
         })
 }
@@ -382,13 +373,13 @@ const pendingAgentPreset = computed(() =>
 )
 
 const agentReasoningEffortOptions = computed(() => reasoningOptions([
-    { label: t(selectedAgentType.value === 'hermes' ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'), value: '' },
+    { label: t('chat.reasoningEffort.options.none'), value: '' },
     ...modelReasoningEfforts(
       getAgentModelGroups(selectedProfile.value || ''),
       selectedAgentProvider.value,
       selectedAgentModel.value,
     ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-], selectedAgentType.value === 'hermes'))
+]))
 const agentReasoningEffortValue = computed({
   get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
   set: (value: string) => { selectedAgentReasoningEffort.value = value },
@@ -1357,7 +1348,7 @@ function currentAgentPresetInput(): GroupAgentPresetInput | null {
         }),
         profile: selectedProfile.value,
         apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+        reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
         agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
         name: agentName.value.trim() || selectedProfile.value,
         description: agentDescription.value.trim(),
@@ -1741,7 +1732,7 @@ async function confirmAddAgent() {
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -1781,7 +1772,7 @@ async function confirmUpdateAgent() {
             }),
             profile: selectedProfile.value,
             apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? undefined : selectedAgentApiMode.value,
-            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : selectedAgentReasoningEffort.value,
+            reasoningEffort: usesGlobalAgentMode.value ? nativeAgentSelection.value.reasoningEffort : agentReasoningEffortValue.value,
             agentPreset: selectedAgentType.value === 'dsh' ? selectedRuntimePreset.value : undefined,
             name: agentName.value.trim() || undefined,
             description: agentDescription.value.trim() || undefined,
@@ -2899,7 +2890,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     </div>
                     <div v-if="usesGlobalAgentMode" class="form-group">
                         <label class="form-label">{{ t('models.models') }}</label>
-                        <NativeCodingAgentModelFields :key="nativeAgentId" :agent="nativeAgentId"
+                        <NativeCodingAgentModelFields :key="nativeAgentId" :agent="nativeAgentId" :profile="selectedProfile || undefined"
                             :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
                             :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                     </div>
@@ -2920,7 +2911,7 @@ function handleClarifyKeydown(event: KeyboardEvent) {
                     </div>
                     <div class="form-group">
                         <label class="form-label">{{ t('chat.reasoningEffort.tooltip') }}</label>
-                        <NativeCodingAgentModelFields v-if="usesGlobalAgentMode" :key="nativeAgentId" :agent="nativeAgentId"
+                        <NativeCodingAgentModelFields v-if="usesGlobalAgentMode" :key="nativeAgentId" :agent="nativeAgentId" :profile="selectedProfile || undefined"
                             field="reasoning-effort" :model="nativeAgentSelection.model" :reasoning-effort="nativeAgentSelection.reasoningEffort"
                             :disabled="isLoadingAgentForm || isSavingAgent" @change="handleNativeAgentSelection" />
                         <NSelect

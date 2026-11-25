@@ -1,4 +1,12 @@
 import { desktopBrowserRoutes } from '../modules/studio/routes/desktop-browser'
+import { studioPluginRoutes } from '../modules/studio/routes/plugins'
+import './provider-store-adapter'
+import './model-gateway-adapter'
+import { modelGatewayMiddleware } from '../modules/studio/middleware/model-gateway'
+import { providerAccountMiddleware } from '../modules/studio/middleware/provider-account'
+import { legacyProviderCredentials } from '../modules/studio/middleware/legacy-provider-credentials'
+import './plugin-agent-adapter'
+import { studioAgentRoutes } from '../modules/studio/routes/agents'
 import type { Context, Next } from 'koa'
 import './hermes-ops-adapter'
 import './agent-log-adapter'
@@ -7,16 +15,17 @@ import './workflow-runtime-adapter'
 import './chat-agent-runtime-adapter'
 import './group-chat-agent-runtime-adapter'
 import './session-agent-runtime-adapter'
+import './person-runtime-adapter'
+import { personRoutes } from '../modules/studio/routes/person'
 import { apiDocsRoutes } from '../modules/studio'
 import { healthRoutes } from './health'
 import { updateRoutes } from './update'
 import { themeRoutes } from '../modules/studio/routes/theme'
+import { navigationRoutes } from '../modules/studio/routes/navigation'
 import { announcementRoutes } from '../modules/studio/routes/announcements'
 import { appConnectionRoutes, appRelayRoutes } from './app-relay'
 import { socialMessageRoutes } from '../modules/studio/routes/social-messages'
 import {
-  claudeCodeProxyRoutes,
-  codexProxyRoutes,
   codingAgentRoutes,
 } from './coding-agents'
 
@@ -85,11 +94,10 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(legacyAppApiCompatibility)
 
   // --- Public routes (no auth required) ---
+  app.use(modelGatewayMiddleware)
   app.use(healthRoutes.routes())
   app.use(authPublicRoutes.routes())
   app.use(mcuDevicePublicRoutes.routes())
-  app.use(claudeCodeProxyRoutes.routes())
-  app.use(codexProxyRoutes.routes())
   app.use(ttsRoutes.routes())
   app.use(apiDocsRoutes.routes())
   app.use(petdexPublicRoutes.routes())
@@ -99,9 +107,13 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
 
   // --- Auth middleware: all routes below require authentication ---
   authMiddleware.forEach((middleware) => app.use(middleware))
+  app.use(legacyProviderCredentials)
+  app.use(providerAccountMiddleware)
 
   // --- Protected routes (auth required) ---
   app.use(authProtectedRoutes.routes())
+  app.use(studioAgentRoutes.routes())
+  app.use(studioPluginRoutes.routes())
   app.use(desktopBrowserRoutes.routes())
   app.use(mcuDeviceRoutes.routes())
   app.use(appConnectionRoutes.routes())
@@ -111,6 +123,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(codingAgentRoutes.routes())
   app.use(agentStatusRoutes.routes())
   app.use(themeRoutes.routes())
+  app.use(navigationRoutes.routes())
   app.use(announcementRoutes.routes())
   app.use(appRelayRoutes.routes())
   app.use(socialMessageRoutes.routes())
@@ -118,6 +131,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(projectRoutes.routes())
   app.use(cronRoutes.routes())
   app.use(modelApiRoutes.routes())
+  app.use(personRoutes.routes())
   app.use(sessionShareRoutes.routes())
   app.use(profileRoutes.routes())
   app.use(ekkoMemoryRoutes.routes())

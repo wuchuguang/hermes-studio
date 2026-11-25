@@ -117,10 +117,9 @@ Deleting a connection preserves its cached login and browser profile for reuse
 if the same address is added again. Desktop settings such as screenshot
 shortcuts and application updates remain shared on this computer.
 
-Storage regression checks: `npm run test -- tests/desktop/desktop-device-storage.test.ts tests/desktop/desktop-device-storage-electron.test.ts`. The second test runs real
-Chromium twice when the macOS Electron development binary is installed; it checks
-same-origin paths, same-host ports, HTTP cache, login storage, cookies, IndexedDB,
-CacheStorage, service workers and embedded-browser profile restoration.
+The legacy storage regression suite has been removed. When adding new device
+storage behavior, add focused tests and inspect isolation of cookies, caches,
+login storage and embedded-browser profiles with temporary device state.
 
 Log in with the deployment's own accounts. The desktop shared token is never
 injected into a remote page, and the tray's "Reset Login" action is disabled
@@ -226,10 +225,5 @@ python-build-standalone release mirror:
 export PBS_BASE_URL=https://github.com/astral-sh/python-build-standalone/releases/download
 ```
 
-Native switcher verification: `npm --prefix packages/desktop run build:main`, then
-`node packages/desktop/scripts/verify-native-device-switcher.cjs`. This uses real
-OS pointer input and requires a graphical desktop (and existing event-posting
-permission on macOS). The manual Windows build runs it before packaging, checks
-that the control is not a draggable caption, and uploads its interaction report.
-The Vitest Electron fixture uses renderer pointer events by default; set
-`STUDIO_TEST_NATIVE_MOUSE=1` to exercise OS hit testing locally as well.
+For new device-switching features, add focused tests and verify switching between
+isolated local and remote device state. See `../../tests/README.md`.

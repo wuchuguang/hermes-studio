@@ -16,6 +16,7 @@ const props = defineProps<{
   favorite?: boolean
   favoriteDisabled?: boolean
   favoriteTitle?: string
+  rememberSelection?: boolean
 }>()
 
 const emit = defineEmits<{

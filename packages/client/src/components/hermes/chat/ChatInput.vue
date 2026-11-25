@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DEFAULT_REASONING_EFFORTS, agentReasoningEffortOptions, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
+import { DEFAULT_REASONING_EFFORTS, agentReasoningEffortOptions, agentReasoningEffortValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
 import type { NativeEffortChoice } from '@/utils/native-model-families'
 import { isBuiltinEkkoSession, isExternalCodingAgentSession, isHermesSession } from '@/utils/hermes/session-agent'
 import { EKKO_SESSION_COMMAND_DEFINITIONS } from '@/utils/hermes/bridge-session-commands'
@@ -40,20 +40,28 @@ const props = withDefaults(defineProps<{
   modelLabel?: string
   modelDisabled?: boolean
   modelExpanded?: boolean
+  hideSettings?: boolean
   initialText?: string
   persistDraft?: boolean
   draft?: boolean
   draftConfig?: Pick<Session, 'profile' | 'provider' | 'model' | 'codingAgentMode' | 'agent'>
+  managedReasoningEffort?: boolean
   reasoningEffort?: string
+  defaultEffortLabel?: string
   reasoningEffortDisabled?: boolean
+  scopedReasoningEfforts?: string[]
   nativeReasoningEfforts?: string[]
   nativeEffortChoices?: NativeEffortChoice[]
+  stopDisabled?: boolean
+  /** Task hosts can supply their own lifecycle and cancellation transport. */
+  stopControl?: { active: boolean; pending: boolean; allowSend?: boolean; request: () => Promise<void> | void }
   sendDisabled?: boolean
   submit?: (text: string, attachments?: Attachment[]) => Promise<boolean>
 }>(), {
   modelLabel: '',
   modelDisabled: false,
   modelExpanded: false,
+  hideSettings: false,
   initialText: '',
   persistDraft: true,
   draft: false,
@@ -72,7 +80,7 @@ const emit = defineEmits<{
 }>()
 
 const reasoningSession = computed(() => props.draft ? props.draftConfig : composerSession.value)
-const defaultReasoningEffortLabel = computed(() => t(isHermesSession(reasoningSession.value)
+const defaultReasoningEffortLabel = computed(() => t(props.reasoningEffortDisabled && isHermesSession(reasoningSession.value)
   ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'))
 const isMoaSession = computed(() => reasoningSession.value?.provider === 'moa')
 const isGlobalCodingAgentSession = computed(() => reasoningSession.value?.codingAgentMode === 'global')
@@ -85,16 +93,19 @@ const reasoningEffortOptions = computed(() => agentReasoningEffortOptions(isGlob
   ? props.nativeEffortChoices.map(choice => ({ value: choice.effort,
     label: choice.effort ? effortLabel(choice.effort) : defaultReasoningEffortLabel.value })) : [
   { label: defaultReasoningEffortLabel.value, value: '' },
-  ...(isGlobalCodingAgentSession.value ? props.nativeReasoningEfforts || [] : modelReasoningEfforts(
+  ...(isGlobalCodingAgentSession.value ? props.nativeReasoningEfforts || [] : props.scopedReasoningEfforts ?? modelReasoningEfforts(
     appStore.profileModelGroups?.find(entry => entry.profile === (reasoningSession.value?.profile || profilesStore.activeProfileName))?.groups || appStore.modelGroups || [],
     reasoningSession.value?.provider || appStore.selectedProvider || '',
     reasoningSession.value?.model || appStore.selectedModel || '',
   )).map(value => ({ label: effortLabel(value), value })),
-], isHermesSession(reasoningSession.value)))
-const currentReasoningEffort = computed<string>(() =>
-  (props.draft ? props.reasoningEffort : composerSession.value?.reasoningEffort
+]))
+const requestedReasoningEffort = computed<string>(() =>
+  ((props.draft || props.managedReasoningEffort) ? props.reasoningEffort : composerSession.value?.reasoningEffort
     || props.nativeEffortChoices?.find(choice => choice.model === composerSession.value?.model)?.effort) || ''
 )
+const currentReasoningEffort = computed(() => props.reasoningEffortDisabled || isReadOnlyCodingAgentEffort.value
+  ? requestedReasoningEffort.value
+  : agentReasoningEffortValue(requestedReasoningEffort.value, reasoningEffortOptions.value))
 const reasoningEffortSliderValue = computed(() => {
   const index = reasoningEffortOptions.value.findIndex(option => option.value === currentReasoningEffort.value)
   return index >= 0 ? index : 0
@@ -127,7 +138,7 @@ const reasoningEffortLabel = computed<string>(() => {
 })
 function onReasoningEffortChange(value: string | null | undefined) {
   if (!canEditReasoningEffort.value) return
-  if (props.draft) {
+  if (props.draft || props.managedReasoningEffort) {
     emit('update:reasoningEffort', value || '')
     return
   }
@@ -137,13 +148,22 @@ function onReasoningEffortChange(value: string | null | undefined) {
   if (variant) void chatStore.setSessionReasoningEffort(sid, variant.effort, variant.model)
   else void chatStore.setSessionReasoningEffort(sid, value || '')
 }
-watch([reasoningEffortOptions, currentReasoningEffort, canEditReasoningEffort], ([options]) => {
+// A rejected automatic write must not retrigger itself when the store rolls back.
+let lastAutomaticEffortWrite = ''
+watch([reasoningEffortOptions, requestedReasoningEffort, canEditReasoningEffort], ([options, requested]) => {
   if (isMoaSession.value || !canEditReasoningEffort.value) {
     showReasoningEffort.value = false
     return
   }
-  if (!isGlobalCodingAgentSession.value && currentReasoningEffort.value && !options.some(option => option.value === currentReasoningEffort.value)) {
-    onReasoningEffortChange('')
+  const fallback = agentReasoningEffortValue('', options)
+  if ((!requested && fallback) || (!isGlobalCodingAgentSession.value && requested && !options.some(option => option.value === requested))) {
+    if (!props.draft && !props.managedReasoningEffort) {
+      const key = JSON.stringify([chatStore.activeSessionId,
+        reasoningSession.value?.profile, reasoningSession.value?.provider, reasoningSession.value?.model, requested, fallback])
+      if (lastAutomaticEffortWrite === key) return
+      lastAutomaticEffortWrite = key
+    }
+    onReasoningEffortChange(fallback)
   }
 }, { immediate: true })
 function reasoningEffortSliderLabel(value: number) {
@@ -348,7 +368,7 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
-  const commands = isEkkoSession.value
+  const commands = /^person-(main|task)-/.test(composerSession.value?.id || '') ? [] : isEkkoSession.value
     ? EKKO_SESSION_COMMAND_DEFINITIONS.map(command => ({ ...command, args: command.args || '', description: t(command.descriptionKey) }))
     : isBridgeSession.value
     ? bridgeCommands.value
@@ -599,10 +619,25 @@ function saveDraftForActiveSession(value: string) {
   }
 }
 
+function restoreCancelledAttachmentDraft() {
+  const sessionId = getActiveDraftSessionId()
+  const draft = chatStore.cancelledAttachmentDrafts.get(sessionId)
+  if (!draft) return
+  chatStore.cancelledAttachmentDrafts.delete(sessionId)
+  // Keep anything typed while the upload was pending as well as the cancelled input.
+  inputText.value = [draft.content, inputText.value].filter(Boolean).join('\n\n')
+  const existingIds = new Set(attachments.value.map(attachment => attachment.id))
+  attachments.value = [...draft.attachments.filter(attachment => !existingIds.has(attachment.id)), ...attachments.value]
+  nextTick(focusComposer)
+}
+
+watch(() => chatStore.cancelledAttachmentDrafts.get(getActiveDraftSessionId()), restoreCancelledAttachmentDraft, { flush: 'post' })
+
 // 从 localStorage 读取设置
 onMounted(() => {
   if (props.initialText) inputText.value = props.initialText
   else if (props.persistDraft) loadDraftForActiveSession()
+  restoreCancelledAttachmentDraft()
   syncViewport()
   window.addEventListener('resize', syncViewport)
   nextTick(() => {
@@ -655,7 +690,8 @@ watch(
 )
 
 const canSend = computed(() => inputText.value.trim().length > 0 || attachments.value.length > 0)
-const sendButtonIsStop = computed(() => !props.draft && chatStore.isStreaming && !canSend.value)
+const sendButtonIsStop = computed(() => props.stopControl ? props.stopControl.active && (props.stopControl.pending || !props.stopControl.allowSend || !canSend.value) : !props.draft && chatStore.isStreaming && !canSend.value)
+const stopPending = computed(() => props.stopControl ? props.stopControl.pending : chatStore.isAborting)
 
 function scrollCommandIntoView() {
   nextTick(() => {
@@ -1049,6 +1085,12 @@ defineExpose({ addFiles, focusComposer })
 
 // --- Send ---
 
+function handleStop() {
+  if (!sendButtonIsStop.value || props.stopDisabled || stopPending.value) return
+  if (props.stopControl) void props.stopControl.request()
+  else chatStore.stopStreaming()
+}
+
 async function handleSend() {
   if (props.sendDisabled || submitting.value) return
   if (isPreparingAttachments.value) {
@@ -1349,6 +1391,7 @@ function openAttachmentPreview(attachment: Attachment) {
           <ScreenshotButton :key="chatStore.activeSessionId || 'new'" :mobile="isMobileViewport" @capture="file => addFiles([file])" />
 
           <NDropdown
+            v-if="!hideSettings"
             trigger="click"
             :options="inputSettingsOptions"
             :show-arrow="true"
@@ -1513,9 +1556,10 @@ function openAttachmentPreview(attachment: Attachment) {
             circle
             class="send-button"
             :class="{ 'send-button--stop': sendButtonIsStop }"
-            :disabled="sendButtonIsStop ? chatStore.isAborting : !canSend || sendDisabled || submitting"
+            :disabled="sendButtonIsStop ? (stopDisabled || stopPending) : !canSend || sendDisabled || submitting"
+            :aria-busy="sendButtonIsStop && stopPending"
             :aria-label="sendButtonIsStop ? 'Stop' : 'Send'"
-            @click="sendButtonIsStop ? chatStore.stopStreaming() : handleSend()"
+            @click="sendButtonIsStop ? handleStop() : handleSend()"
           >
             <template #icon>
               <svg

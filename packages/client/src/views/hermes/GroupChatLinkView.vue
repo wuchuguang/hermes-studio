@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import type { ChatCodingAgentId } from '@/api/coding-agents'
+import { agentMetadata, agentSupportsSurface } from '@/utils/agent-catalog'
+
 import { deploymentUrl } from '@/utils/deployment-url'
 import { agentReasoningEffortOptions as reasoningOptions, agentReasoningEffortValue as reasoningValue, modelReasoningEfforts } from '@/utils/model-reasoning-effort'
-import { isNativeCodingAgent, isGlobalOnlyCodingAgent } from '@/utils/agent-catalog'
 import PageLoading from '@/components/common/PageLoading.vue'
 import { GROUP_AGENT_OPTIONS } from "@/utils/agent-options"
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -105,7 +107,7 @@ const hasServerHandoff = computed(() => (
   && !!handoffPairingTicket.value
 ))
 const groupAgentTypeDefinitions = GROUP_AGENT_OPTIONS
-const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.map((option) => {
+const groupAgentTypeOptions = computed(() => groupAgentTypeDefinitions.filter(option => agentSupportsSurface(option.value, 'group-chat')).map((option) => {
   const disabled = !isAgentStatusAvailable(agentStatusSnapshot.value, option.value)
   return {
     ...option,
@@ -126,19 +128,7 @@ function getAgentModelGroups(profile: string) {
     .filter((group) => {
       if (group.provider === 'moa') return selectedAgentType.value === 'hermes'
       if (selectedAgentType.value === 'hermes') return true
-      const codingAgentId = selectedAgentType.value === 'ekko'
-        ? 'ekko-agent'
-        : selectedAgentType.value === 'claude'
-          ? 'claude-code'
-          : selectedAgentType.value === 'pi'
-            ? 'pi'
-            : selectedAgentType.value === 'grok'
-              ? 'grok'
-            : (isGlobalOnlyCodingAgent(selectedAgentType.value) || (selectedAgentType.value === 'antigravity' || isNativeCodingAgent(selectedAgentType.value)))
-              ? 'cursor'
-            : selectedAgentType.value === 'dsh' ? 'dsh' : selectedAgentType.value === 'opencode'
-              ? 'opencode'
-              : 'codex'
+      const codingAgentId = (agentMetadata(selectedAgentType.value)?.id || selectedAgentType.value) as ChatCodingAgentId
       return canScopedCodingAgentUseProvider(codingAgentId, group.provider)
     })
 }
@@ -180,18 +170,18 @@ const agentApiModeOptions = computed(() => [
   { label: t('codingAgents.protocolAnthropicMessages'), value: 'anthropic_messages' },
 ])
 const agentReasoningEffortOptions = computed(() => reasoningOptions([
-  { label: t(selectedAgentType.value === 'hermes' ? 'chat.reasoningEffort.options.default' : 'chat.reasoningEffort.options.none'), value: '' },
+  { label: t('chat.reasoningEffort.options.none'), value: '' },
   ...modelReasoningEfforts(
     getAgentModelGroups(selectedProfile.value),
     selectedAgentProvider.value,
     selectedAgentModel.value,
   ).map(value => ({ label: t(`chat.reasoningEffort.options.${value}`), value })),
-], selectedAgentType.value === 'hermes'))
+]))
 const agentReasoningEffortValue = computed({
   get: () => reasoningValue(selectedAgentReasoningEffort.value, agentReasoningEffortOptions.value),
   set: (value: string) => { selectedAgentReasoningEffort.value = value },
 })
-const supportsGlobalAgentMode = computed(() => ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
+const supportsGlobalAgentMode = computed(() => Boolean(agentMetadata(selectedAgentType.value)?.modes.includes('global')) || ['claude', 'codex', 'pi', 'grok', 'opencode', 'dsh', 'cursor', 'antigravity', 'qwen', 'kimi', 'codebuddy', 'qoder', 'copilot', 'zcode'].includes(selectedAgentType.value))
 const usesGlobalAgentMode = computed(() => supportsGlobalAgentMode.value && selectedAgentMode.value === 'global')
 const agentModeOptions = computed(() => [
   { label: t('codingAgents.launchModeGlobal'), value: 'global' },
@@ -220,7 +210,7 @@ const selectedAgent = computed<RemoteGroupAgentDescriptor | null>(() => {
     }),
     profile: selectedProfile.value,
     apiMode: selectedAgentType.value === 'hermes' || usesGlobalAgentMode.value ? '' : selectedAgentApiMode.value,
-    reasoningEffort: usesGlobalAgentMode.value ? '' : selectedAgentReasoningEffort.value,
+    reasoningEffort: usesGlobalAgentMode.value ? '' : agentReasoningEffortValue.value,
     name: agentName.value.trim() || selectedProfile.value,
     description: agentDescription.value.trim(),
     avatar: agentAvatar.value ? JSON.stringify(agentAvatar.value) : '',

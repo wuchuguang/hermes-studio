@@ -3,6 +3,7 @@ import type { ProviderApiMode } from './provider-api-mode'
 import { fetchAuthenticatedBlob, saveBlob } from './binary-content'
 
 export interface SessionSummary {
+  history_cleared_at?: number
   id: string
   profile?: string | null
   source: string
@@ -15,6 +16,7 @@ export interface SessionSummary {
   api_mode?: ProviderApiMode
   reasoning_effort?: string
   agent_preset?: string
+  bot_type?: string
   title: string | null
   parent_session_id?: string | null
   fork_point_message_id?: string | null
@@ -107,6 +109,7 @@ export interface SessionContext {
 }
 
 export interface PaginatedSessionMessages {
+  personFlows?: import('../person').PersonFlowSnapshot
   session: SessionSummary
   messages: HermesMessage[]
   taskPlans?: import('@/utils/task-plan').TaskPlanSnapshot[]
@@ -142,6 +145,7 @@ export interface HermesSessionPage {
 }
 
 export interface HermesMessage {
+  person_task_return?: import('../person').PersonTaskReturn
   run_usage?: import('@/utils/run-usage').RunUsageSummary
   id: number
   session_id: string
@@ -348,12 +352,13 @@ export async function writeSessionWorkspaceFile(
   sessionId: string,
   path: string,
   content: string,
+  createOnly = false,
 ): Promise<void> {
   await request<{ ok: boolean }>(
     `/api/studio/sessions/${encodeURIComponent(sessionId)}/workspace-file/write`,
     {
       method: 'PUT',
-      body: JSON.stringify({ path, content }),
+      body: JSON.stringify({ path, content, createOnly: createOnly || undefined }),
     },
   )
 }
@@ -465,12 +470,17 @@ export async function fetchSessionMessagesPage(
   offset: number,
   limit = 150,
   profile?: string | null,
+  timeline?: { before?: string | null },
 ): Promise<PaginatedSessionMessages | null> {
   try {
     const params = new URLSearchParams()
     params.set('offset', String(offset))
     params.set('limit', String(limit))
     if (profile) params.set('profile', profile)
+    if (timeline) {
+      params.set('timeline', 'true')
+      if (timeline.before) params.set('before', timeline.before)
+    }
     const res = await request<PaginatedSessionMessages>(
       `/api/studio/sessions/conversations/${encodeURIComponent(id)}/messages/paginated?${params}`,
     )

@@ -1,5 +1,9 @@
+import { personDisplayMessages, personDisplayPage, personDisplayMetadata, PERSON_DISPLAY_PROJECTION } from '../services/chat-run/person-display'
+import { personConversationFlows, personConversationTimeline } from '../services/person/flow-conversation'
+import { isPersonSession, isPrivatePersonSession, ownsPersonSession } from '../contracts/person-session'
 import { isNativeCodingAgent } from '../contracts/agents/native-coding-agents'
 import { withRunUsage } from '../public/usage'
+import { withPersonTaskReturns } from '../services/person/service'
 import { businessEvents } from '../services/webhooks/business-events'
 import { publishSessionRemoval } from '../services/notifications/session-removal'
 import { getUsagePricing, saveUsagePricing, validateUsagePricing } from '../services/usage/usage-pricing'
@@ -9,6 +13,7 @@ import { ensureBusinessConsumers } from '../services/webhooks/business-consumers
 import { authorizeSessionShare, authorizeShareFile } from '../services/session-shares/access'
 import { sessionShareService } from '../services/session-shares/service'
 import { getSessionTaskPlans } from '../services/task-plans'
+import { getSessionTasks, listSessionTaskItems, setSessionTaskStatus, SessionTasksError } from '../services/session-tasks'
 import { historySessionSource, isBuiltinEkkoAgent } from '../contracts/history-source'
 import {
   deleteHermesSessionForProfile,
@@ -80,10 +85,11 @@ import {
 } from '../services/workspace/manager'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { getMessageSelectionGroups } from '../public/sessions'
-import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
-import { buildFileContentHeaders, getFilePreviewDescriptor } from '../services/files/file-preview'
+import { isSensitivePath, MAX_EDIT_SIZE } from '../services/files/file-policy'
+import { fileContent, statIfPresent, renameWithoutOverwrite } from '../services/files/file-operations'
+import { serveWorkspaceFile } from '../services/files/file-preview'
 import { decorateWorkspaceEntries, getWorkspaceFileGitDiff } from '../services/files/workspace-git-status'
-import { copyFile, mkdir, readFile, readdir, rename as fsRename, rm as fsRm, stat as fsStat, writeFile } from 'fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm as fsRm, stat as fsStat, writeFile } from 'fs/promises'
 import { normalize as pathNormalize, resolve as pathResolve } from 'path'
 
 function getPendingDeletedSessionIds(): Set<string> {
@@ -92,6 +98,7 @@ function getPendingDeletedSessionIds(): Set<string> {
 
 function filterPendingDeletedSessions<T extends { id: string }>(items: T[]): T[] {
   const pendingIds = getPendingDeletedSessionIds()
+  items = items.filter(item => !isPrivatePersonSession(item.id))
   if (pendingIds.size === 0) return items
   return items.filter(item => !pendingIds.has(item.id))
 }
@@ -156,6 +163,9 @@ function filterByAllowedProfiles<T>(ctx: any, items: T[]): T[] {
 }
 
 function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
+  if (ctx.method === 'GET' && ctx.state?.personTaskRead === session?.id) return false
+  if (isPersonSession(session?.id) && ownsPersonSession(ctx.state?.user?.id, session)) return false
+  if (isPrivatePersonSession(session?.id)) { ctx.status = 404; ctx.body = { error: 'Session not found' }; return true }
   if (!session || canAccessProfile(ctx, session.profile)) return false
   ctx.status = 403
   ctx.body = { error: `Profile "${session.profile || 'default'}" is not available for this user` }
@@ -434,6 +444,7 @@ export async function listConversations(ctx: any) {
     agent_session_id: s.agent_session_id,
     agent_native_session_id: s.agent_native_session_id,
     agent_preset: s.agent_preset,
+    bot_type: s.bot_type,
     model: s.model,
     provider: s.provider,
     api_mode: s.api_mode,
@@ -472,7 +483,7 @@ export async function getConversationMessages(ctx: any) {
     return
   }
   if (denySessionAccess(ctx, detail)) return
-  const messages = (detail.messages || [])
+  const messages = personDisplayMessages(detail.id, detail.messages || [])
     .filter(m => {
       if (humanOnly && m.role !== 'user' && m.role !== 'assistant') return false
       if (!m.content) return false
@@ -805,6 +816,10 @@ export async function search(ctx: any) {
   }
 }
 
+function personDisplaySession<T extends { id: string; messages?: any[] }>(session: T): T {
+  return isPersonSession(session.id) ? personDisplayPage(session.id, { ...personDisplayMetadata(session), messages: withPersonTaskReturns(session.id, withRunUsage(session.id, session.messages || [])) }) : session
+}
+
 export async function get(ctx: any) {
   const session = localGetSessionDetail(ctx.params.id)
   if (!session) {
@@ -816,7 +831,7 @@ export async function get(ctx: any) {
   if (ctx.state?.sessionShare) {
     delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
   }
-  ctx.body = { session }
+  ctx.body = { session: personDisplaySession(session) }
 }
 
 export async function listWorkspaceRunChanges(ctx: any) {
@@ -922,7 +937,7 @@ async function resolveSessionPreviewFile(ctx: any, pathValue: unknown) {
 function handleWorkspaceFileError(ctx: any, err: any): void {
   if (err?.handled) return
   const status = Number(err?.status || 0)
-  ctx.status = status >= 400 ? status : err?.code === 'ENOENT' ? 404 : 500
+  ctx.status = status >= 400 ? status : err?.code === 'ENOENT' ? 404 : err?.code === 'EEXIST' ? 409 : 500
   ctx.body = { error: err?.message || 'Failed to access workspace file', code: err?.code || 'workspace_file_error' }
 }
 
@@ -943,9 +958,10 @@ export async function listWorkspaceFiles(ctx: any) {
         return entry
       } catch { return null }
     }))).filter((entry): entry is typeof entries[number] => entry !== null) : entries
-    const mapped = await Promise.all(visibleEntries.map(async entry => {
+    const mapped = (await Promise.all(visibleEntries.map(async entry => {
       const entryFullPath = pathResolve(fullPath, entry.name)
-      const stat = await fsStat(entryFullPath)
+      const stat = await statIfPresent(entryFullPath)
+      if (!stat) return null
       return {
         name: entry.name,
         path: workspaceRelativePath(workspace, entryFullPath),
@@ -954,7 +970,7 @@ export async function listWorkspaceFiles(ctx: any) {
         size: stat.size,
         modTime: stat.mtime.toISOString(),
       }
-    }))
+    }))).filter(entry => entry !== null)
     mapped.sort((a, b) => {
       if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
       return a.name.localeCompare(b.name)
@@ -1010,55 +1026,16 @@ export async function diffWorkspaceFile(ctx: any) {
 export async function readWorkspaceFileContent(ctx: any) {
   try {
     const { relativePath, fullPath } = await resolveSessionPreviewFile(ctx, ctx.query.path)
-    const info = await fsStat(fullPath)
-    if (!info.isFile()) {
-      ctx.status = 400
-      ctx.body = { error: 'Not a file', code: 'not_a_file' }
-      return
-    }
-
-    const download = String(ctx.query?.download || '') === '1'
-    const textPreview = String(ctx.query?.text || '') === '1'
-    const descriptor = getFilePreviewDescriptor(relativePath)
-    if (!download && !textPreview && !descriptor) {
-      ctx.status = 415
-      ctx.body = { error: 'File type is not supported for preview', code: 'unsupported_preview' }
-      return
-    }
-    const maxBytes = download ? MAX_DOWNLOAD_SIZE : textPreview ? MAX_EDIT_SIZE : descriptor!.maxBytes
-    if (info.size > maxBytes) {
-      ctx.status = 413
-      ctx.body = {
-        error: download ? 'File too large to download' : 'File too large to preview',
-        code: 'file_too_large',
-      }
-      return
-    }
-
-    const data = await readFile(fullPath)
-    if (data.length > maxBytes) {
-      ctx.status = 413
-      ctx.body = {
-        error: download ? 'File too large to download' : 'File too large to preview',
-        code: 'file_too_large',
-      }
-      return
-    }
-    const headers = buildFileContentHeaders({
-      fileName: relativePath,
-      mime: textPreview ? 'text/plain; charset=utf-8' : descriptor?.mime || 'application/octet-stream',
-      size: data.length,
-      download,
-    })
-    for (const [name, value] of Object.entries(headers)) ctx.set(name, value)
-    ctx.body = data
+    const download = ctx.query?.download === '1'
+    const text = ctx.query?.text === '1'
+    await serveWorkspaceFile(ctx, fullPath, relativePath, download, text)
   } catch (err: any) {
     handleWorkspaceFileError(ctx, err)
   }
 }
 
 export async function writeWorkspaceFile(ctx: any) {
-  const body = ctx.request.body as { path?: unknown; content?: unknown }
+  const body = ctx.request.body as { path?: unknown; content?: unknown; createOnly?: boolean }
   try {
     const { relativePath, fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path)
     if (isSensitivePath(relativePath)) {
@@ -1066,14 +1043,13 @@ export async function writeWorkspaceFile(ctx: any) {
       ctx.body = { error: 'Cannot modify sensitive file', code: 'permission_denied' }
       return
     }
-    const content = typeof body?.content === 'string' ? body.content : ''
-    const data = Buffer.from(content, 'utf-8')
+    const data = fileContent(body?.content)
     if (data.length > MAX_EDIT_SIZE) {
       ctx.status = 413
       ctx.body = { error: 'Content too large', code: 'file_too_large' }
       return
     }
-    await writeFile(fullPath, data)
+    await writeFile(fullPath, data, { flag: body?.createOnly === true ? 'wx' : 'w' })
     ctx.body = { ok: true, path: relativePath }
   } catch (err: any) {
     handleWorkspaceFileError(ctx, err)
@@ -1122,7 +1098,7 @@ export async function renameWorkspaceFile(ctx: any) {
       ctx.body = { error: 'Cannot rename sensitive file', code: 'permission_denied' }
       return
     }
-    await fsRename(oldTarget.fullPath, newTarget.fullPath)
+    await renameWithoutOverwrite(oldTarget.fullPath, newTarget.fullPath)
     ctx.body = { ok: true }
   } catch (err: any) {
     handleWorkspaceFileError(ctx, err)
@@ -1181,6 +1157,63 @@ function cleanSessionContextMessages(messages: any[]): Array<{
     })
 }
 
+export function listTasks(ctx: any) {
+  const { status, order = 'newest', search = '', offset = '0', limit = '50' } = ctx.query
+  if ((status !== undefined && status !== 'open' && status !== 'completed' && status !== 'closed')
+    || (ctx.query.profile !== undefined && typeof ctx.query.profile !== 'string')
+    || (order !== 'newest' && order !== 'oldest') || typeof search !== 'string' || search.length > 200
+    || typeof offset !== 'string' || !/^\d+$/.test(offset) || !Number.isSafeInteger(Number(offset))
+    || typeof limit !== 'string' || !/^\d+$/.test(limit) || Number(limit) < 1 || Number(limit) > 100) {
+    ctx.status = 400
+    ctx.body = { error: 'Invalid task list filters or pagination' }
+    return
+  }
+  // A run credential remains bound even when a caller requests all profiles.
+  const runScoped = Boolean(ctx.get?.('x-studio-run-context'))
+  const profile = runScoped ? ctx.state.profile?.name : explicitProfileFilter(ctx)
+  const allowed = allowedProfileSet(ctx)
+  const profiles = listProfileNamesFromDisk().filter(name => (!runScoped || Boolean(profile))
+    && (!profile || profile === name) && (!allowed || allowed.has(name)))
+  ctx.body = listSessionTaskItems({ profiles, excludeSessionIds: [...getPendingDeletedSessionIds()],
+    search: search.trim(), status, order, offset: Number(offset), limit: Number(limit) })
+}
+
+/** Read the goal ledger without adding it to chat messages or run events. */
+export function getTasks(ctx: any) {
+  const session = localGetSession(ctx.params.id)
+  const profile = explicitProfileFilter(ctx)
+  if (!session || (profile && (session.profile || 'default') !== profile)) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, session)) return
+  ctx.body = getSessionTasks(session.id)
+}
+
+export function updateTaskStatus(ctx: any) {
+  if (ctx.get?.('x-studio-run-context')) {
+    ctx.status = 403
+    ctx.body = { error: 'Manual task status changes require user access' }
+    return
+  }
+  const session = localGetSession(ctx.params.id)
+  const profile = explicitProfileFilter(ctx)
+  if (!session || getPendingDeletedSessionIds().has(session.id) || (profile && (session.profile || 'default') !== profile)) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, session)) return
+  try {
+    ctx.body = setSessionTaskStatus(session.id, session.profile || 'default', ctx.params.taskId, ctx.request.body || {})
+  } catch (error) {
+    if (!(error instanceof SessionTasksError)) throw error
+    ctx.status = error.status
+    ctx.body = { error: error.message }
+  }
+}
+
 export async function getContext(ctx: any) {
   const session = localGetSessionDetail(ctx.params.id)
   if (!session) {
@@ -1190,7 +1223,7 @@ export async function getContext(ctx: any) {
   }
   if (denySessionAccess(ctx, session)) return
 
-  const messages = cleanSessionContextMessages(session.messages || [])
+  const messages = cleanSessionContextMessages(personDisplayMessages(session.id, session.messages || []))
   ctx.body = {
     session_id: session.id,
     profile: session.profile || null,
@@ -1466,6 +1499,11 @@ export async function remove(ctx: any) {
   const sessionId = ctx.params.id
   const existing = localGetSession(sessionId)
   if (denySessionAccess(ctx, existing)) return
+  if (isPersonSession(sessionId) && existing) {
+    const { deletePersonConversation } = await import('../services/person/conversations')
+    ctx.body = { ok: true, ...await deletePersonConversation(ctx.state.user.id, sessionId, existing.history_revision) }
+    return
+  }
   const hermesProfile = requestedProfile(ctx) || existing?.profile || getActiveProfileName()
   const providerAgentSession = isProviderAgentSession(existing)
   if (providerAgentSession) stopCodingAgentSessionRun(sessionId, { reportClosed: false })
@@ -1526,6 +1564,22 @@ export async function batchRemove(ctx: any) {
   for (const target of targets) {
     const { id } = target
     const existing = localGetSession(id)
+    if (isPrivatePersonSession(id) && !ownsPersonSession(ctx.state?.user?.id, existing)) {
+      results.failed++
+      results.errors.push({ id, error: 'Session not found' })
+      continue
+    }
+    if (isPersonSession(id) && existing) {
+      try {
+        const { deletePersonConversation } = await import('../services/person/conversations')
+        await deletePersonConversation(ctx.state.user.id, id, existing.history_revision)
+        results.deleted++
+      } catch (error) {
+        results.failed++
+        results.errors.push({ id, error: error instanceof Error ? error.message : String(error) })
+      }
+      continue
+    }
     const targetProfile = target.profile || existing?.profile
     if (targetProfile && !canAccessProfile(ctx, targetProfile)) {
       results.failed++
@@ -2146,7 +2200,7 @@ export async function createWorkspaceFolder(ctx: any) {
 
 export async function renameWorkspaceFolder(ctx: any) {
   const { dirname, join } = await import('path')
-  const { rename, stat } = await import('fs/promises')
+  const { stat } = await import('fs/promises')
   const { path, name } = ctx.request.body as { path?: string; name?: string }
   const folderName = String(name || '').trim()
   const currentPath = String(path || '').trim()
@@ -2184,7 +2238,7 @@ export async function renameWorkspaceFolder(ctx: any) {
       ctx.body = { error: 'Path is not a directory' }
       return
     }
-    await fsRename(resolvedCurrent.fullPath, targetPath)
+    await renameWithoutOverwrite(resolvedCurrent.fullPath, targetPath)
     ctx.body = { ok: true }
   } catch (err: any) {
     ctx.status = err?.code === 'EEXIST' ? 409 : err?.code === 'ENOENT' ? 404 : 500
@@ -2259,7 +2313,8 @@ export async function exportSession(ctx: any) {
   const filename = `${safeName}_${ctx.params.id.slice(0, 8)}.${ext}`
 
   if (mode === 'compressed') {
-    const result = await compressSession(session)
+    const compressed = await compressSession(session)
+    const result = { ...compressed, messages: personDisplayMessages(session.id, compressed.messages) }
     if (ext === 'json') {
       ctx.set('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
       ctx.set('Content-Type', 'application/json')
@@ -2273,11 +2328,11 @@ export async function exportSession(ctx: any) {
     if (ext === 'txt') {
       ctx.set('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
       ctx.set('Content-Type', 'text/plain; charset=utf-8')
-      ctx.body = serializeAsText(session.title, (session as any).messages || [])
+      ctx.body = serializeAsText(session.title, (personDisplaySession(session) as { messages?: any[] }).messages || [])
     } else {
       ctx.set('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
       ctx.set('Content-Type', 'application/json')
-      ctx.body = JSON.stringify(session, null, 2)
+      ctx.body = JSON.stringify(personDisplaySession(session), null, 2)
     }
   }
 }
@@ -2371,7 +2426,10 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const session = { ...result.session, profile: (result.session as any).profile || profile || 'default' }
   if (denySessionAccess(ctx, session)) return
   const continuation = await getCompressionContinuation(session.id, profile || undefined)
-  const assistantMessageIds = result.messages
+  const timeline = ctx.query.timeline === 'true' && isPersonSession(session.id)
+    ? personConversationTimeline(ctx.state.user.id, session.id, { before: ctx.query.before, limit: ctx.query.limit }) : null
+  const pageMessages = timeline?.messages || result.messages
+  const assistantMessageIds = pageMessages
     .filter((message: any) => String(message.display_role || message.role || '') === 'assistant')
     .map((message: any) => message.id)
 
@@ -2384,12 +2442,13 @@ export async function getConversationMessagesPaginated(ctx: any) {
       agent: (session as any).agent,
       agent_mode: (session as any).agent_mode,
       coding_agent_id: (session as any).coding_agent_id,
+      bot_type: (session as any).bot_type,
       workspace: (session as any).workspace || null,
       title: session.title,
       parent_session_id: (session as any).parent_session_id,
       fork_point_message_id: (session as any).fork_point_message_id,
       parent_title: ctx.state?.sessionShare ? undefined : (session as any).parent_title,
-      parent_last_message: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message,
+      parent_last_message: ctx.state?.sessionShare || isPersonSession(session.id) ? undefined : (session as any).parent_last_message,
       parent_last_message_role: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message_role,
       started_at: session.started_at,
       ended_at: session.ended_at,
@@ -2400,12 +2459,14 @@ export async function getConversationMessagesPaginated(ctx: any) {
       output_tokens: session.output_tokens,
       continuation,
     },
-    messages: withRunUsage(ctx.params.id, result.messages),
-    taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
+    messages: personDisplayMessages(session.id, withPersonTaskReturns(ctx.params.id, withRunUsage(ctx.params.id, pageMessages))),
+    ...(isPersonSession(session.id) ? { personFlows: timeline?.personFlows || personConversationFlows(ctx.state.user.id, session.id) } : {}),
+    ...(isPersonSession(session.id) ? { projection: PERSON_DISPLAY_PROJECTION, consumedCount: result.messages.length, nextOffset: result.offset + result.messages.length } : {}),
+    taskPlans: getSessionTaskPlans(ctx.params.id, pageMessages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,
     offset: result.offset,
     limit: result.limit,
-    hasMore: result.hasMore,
+    hasMore: timeline?.hasMoreBefore ?? result.hasMore,
   }
 }

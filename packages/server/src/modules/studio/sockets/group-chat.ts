@@ -1,3 +1,4 @@
+import { bindProviderSocket } from '../public/provider-account'
 import { getGroupMessageSelection, deleteGroupMessages, groupMessageDeletionError } from '../repositories/group-message-deletion'
 import { registerAppEventState, publishAppState, stateEvent, planStateEvent } from '../services/webhooks/app-event-state'
 import type { BusinessEvent } from '../services/webhooks/business-events'
@@ -8,6 +9,7 @@ import { parseGroupRunUsage } from '../services/group-chat/run-usage'
 import { bindLegacyAppEvents } from '../services/webhooks/legacy-app-events'
 import { registerGroupEventAccess } from '../services/webhooks/app-events'
 import { publishGroupMessage, publishGroupInteraction } from '../services/webhooks/domain-events'
+import { publishPluginObservation } from '../services/plugins/event-source'
 import { Server, Socket, Namespace } from 'socket.io'
 import type { Server as HttpServer } from 'http'
 import { mkdirSync } from 'fs'
@@ -247,7 +249,7 @@ interface RoomAgent {
     id: string
     roomId: string
     agentId: string
-    agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+    agent: `plugin:${string}/${string}` | 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode: 'scoped' | 'global'
     priorAgentMode: 'scoped' | 'global' | ''
     profile: string
@@ -278,7 +280,7 @@ interface GroupAgentActivity {
 }
 
 interface RoomAgentMetadata {
-    agent?: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+    agent?: `plugin:${string}/${string}` | 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
     agentMode?: 'scoped' | 'global'
     priorAgentMode?: 'scoped' | 'global' | ''
     provider?: string
@@ -612,7 +614,7 @@ function storedGroupAgentRunIdentity(row: any): {
     return match?.[1] ? { ownerId, idPrefix: `${match[1]}_part_` } : null
 }
 
-class ChatStorage {
+export class ChatStorage {
     private readonly trustedAgentMessageMetadata = new Map<string, { mentionDepth: number; handoffChainId: string; continuationAttemptId: string }>()
     private roomAgentOnlineProvider: ((roomId: string, agentId: string) => boolean) | null = null
 
@@ -2565,6 +2567,20 @@ class ChatStorage {
 
             this.ensureCurrentRoomTokenAccounting(roomId)
             const previousIds = this.contextWindowMessageIdsForTokenDelta(roomId)
+            const summary = this.getRoomSummary(roomId)
+            let invalidatesSummary = false
+            if (summary?.summaryThroughMessageId || summary?.summarizedTurnCount) {
+                // Inspect the full cursor history, not the bounded context window;
+                // multipart replies and equal timestamps use canonical ordering.
+                const boundary = sliceGroupMessagesCanonical(
+                    db.prepare('SELECT id, timestamp FROM gc_messages WHERE roomId = ?').all(roomId) as Array<{ id: string; timestamp: number }>,
+                    { throughMessageId: summary.summaryThroughMessageId },
+                )
+                invalidatesSummary = !summary.summaryThroughMessageId
+                    || !boundary.throughMessageFound
+                    || boundary.messages.at(-1)?.timestamp !== summary.summaryThroughMessageTimestamp
+                    || boundary.messages.some(item => item.id === selected.messageId)
+            }
             const cancelledAt = Date.now()
             const queueIds = siblings.map(item => item.id)
             const placeholders = queueIds.map(() => '?').join(', ')
@@ -2599,8 +2615,14 @@ class ChatStorage {
                  SET totalTokens = ?, summaryGeneration = summaryGeneration + 1
                  WHERE id = ?`,
             ).run(totalTokens, roomId)
-            db.prepare('DELETE FROM gc_summary_reviews WHERE roomId = ?').run(roomId)
-            db.prepare('DELETE FROM gc_room_summaries WHERE roomId = ?').run(roomId)
+            if (invalidatesSummary) {
+                db.prepare('DELETE FROM gc_summary_reviews WHERE roomId = ?').run(roomId)
+                db.prepare('DELETE FROM gc_room_summaries WHERE roomId = ?').run(roomId)
+            } else {
+                this.invalidateRoomSummaryRun(roomId)
+                // A failed drain may still point at the retracted message.
+                db.prepare("UPDATE gc_room_summaries SET summaryDrainThroughMessageId = '' WHERE roomId = ? AND summaryDrainThroughMessageId != ''").run(roomId)
+            }
 
             return {
                 messageId: selected.messageId,
@@ -2663,9 +2685,9 @@ class ChatStorage {
         const agentMode = metadata.agentMode === 'global' ? 'global' : 'scoped'
         const priorAgentMode = storedPriorAgentMode(metadata.priorAgentMode)
         const provider = agentMode === 'global' ? '' : String(metadata.provider || '').trim()
-        const model = agentMode === 'global' ? '' : String(metadata.model || '').trim()
+        const model = String(metadata.model || '').trim()
         const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : String(metadata.apiMode || '').trim()
-        const reasoningEffort = agentMode === 'global' ? '' : String(metadata.reasoningEffort || '').trim()
+        const reasoningEffort = String(metadata.reasoningEffort || '').trim()
         const agentPreset = typeof metadata.agentPreset === 'string' ? metadata.agentPreset.trim() : ''
         const avatar = String(metadata.avatar || '').trim()
         const executorType = metadata.executorType === 'remote' ? 'remote' : 'server'
@@ -2744,9 +2766,9 @@ class ChatStorage {
         const agentMode = metadata.agentMode === 'global' ? 'global' : 'scoped'
         const priorAgentMode = storedPriorAgentMode(metadata.priorAgentMode)
         const provider = agentMode === 'global' ? '' : String(metadata.provider || '').trim()
-        const model = agentMode === 'global' ? '' : String(metadata.model || '').trim()
+        const model = String(metadata.model || '').trim()
         const apiMode = agent === 'hermes' || agentMode === 'global' ? '' : String(metadata.apiMode || '').trim()
-        const reasoningEffort = agentMode === 'global' ? '' : String(metadata.reasoningEffort || '').trim()
+        const reasoningEffort = String(metadata.reasoningEffort || '').trim()
         const agentPreset = typeof metadata.agentPreset === 'string' ? metadata.agentPreset.trim() : ''
         const avatar = String(metadata.avatar || '').trim()
         this.db()?.prepare(
@@ -4170,14 +4192,15 @@ export class GroupChatServer {
     // ─── Connection ─────────────────────────────────────────────
 
     private onConnection(socket: Socket): void {
+        bindProviderSocket(socket)
         bindLegacyAppEvents(socket, 'group', event => Boolean(event.subject.room_id && this.canSocketObserveRoom(socket, event.subject.room_id)))
-        const auth = socket.handshake.auth as { userId?: string; name?: string; description?: string; source?: string; agentSocketSecret?: string; authUserId?: number }
+        const auth = socket.handshake.auth as { userId?: string; name?: string; description?: string; source?: string; agentSocketSecret?: string }
         const requestedSource = auth.source === 'agent' && auth.agentSocketSecret === GROUP_CHAT_AGENT_SOCKET_SECRET ? 'agent' : 'human'
         const authenticatedUser = socket.data.authUser as AuthenticatedUser | undefined
-        const authUserId = requestedSource === 'human'
-            ? authenticatedUser?.id ?? (typeof auth.authUserId === 'number' && auth.authUserId > 0 ? auth.authUserId : undefined)
-            : undefined
-        const userId = authUserId ? authenticatedGroupUserId(authUserId) : auth.userId || socket.id
+        const authUserId = requestedSource === 'human' ? authenticatedUser?.id : undefined
+        const suppliedUserId = typeof auth.userId === 'string' ? auth.userId : ''
+        const userId = authUserId ? authenticatedGroupUserId(authUserId)
+            : suppliedUserId && !suppliedUserId.startsWith('auth:') ? suppliedUserId : socket.id
         const userName = auth.name || authenticatedUser?.username || `User-${userId.slice(0, 6)}`
         const description = auth.description || ''
 
@@ -4248,9 +4271,8 @@ export class GroupChatServer {
         if (!room) return false
         const authUser = socket.data?.authUser as AuthenticatedUser | undefined
         if (!authUser) {
-            // With authentication disabled, handshake userId/authUserId values are client-controlled.
-            // They may identify a joined in-context member, but must never grant off-room global
-            // approval visibility or authority based on persisted membership alone.
+            // Unauthenticated identities may identify joined members but cannot grant
+            // off-room approval visibility or authority through persisted membership.
             const joined = this.getOnlineRoomMember(socket, roomId)
             return Boolean(joined && joined.member.source === 'human')
         }
@@ -4595,8 +4617,7 @@ export class GroupChatServer {
             if (!storedRoom) this.storage.saveRoom(roomId, roomId)
         }
 
-        // Look up the user's avatar via their numeric users.id from the web UI session.
-        // Falls back to name-based lookup for clients that don't pass authUserId.
+        // Look up the authenticated account's avatar, or use the guest's room avatar.
         let userAvatar = isInviteGuest
             ? requestedAvatar || existingMember?.avatar || ''
             : existingMember?.avatar || ''
@@ -5075,6 +5096,12 @@ export class GroupChatServer {
         }
     }
 
+    private publishPluginStream(type: string, roomId: string, messageId: string, agentName: string, delta?: string, runId?: string): void {
+        publishPluginObservation(type, this.storage.getRoom(roomId)?.summaryProfile || 'default', 'group_chat',
+            { room_id: roomId, message_id: messageId || undefined, run_id: runId || undefined },
+            { agent_name: agentName, ...(delta === undefined ? {} : { delta }) })
+    }
+
     private handleMessageStreamStart(socket: Socket, data: { roomId?: string; id?: string; senderId?: string; senderName?: string; timestamp?: number; run_id?: string; agentSessionId?: string }): void {
         const roomId = data.roomId || 'general'
         const member = this.getCurrentAgentEventMember(socket, roomId, '', data.agentSessionId)
@@ -5097,6 +5124,7 @@ export class GroupChatServer {
         }
         this.streamSnapshots.start(message, String(data.agentSessionId).trim())
         this.nsp.to(roomId).emit('message_stream_start', message)
+        this.publishPluginStream('group.message.started', roomId, id, member.name, undefined, message.run_id || undefined)
     }
 
     private handleMessageStreamDelta(socket: Socket, data: { roomId?: string; id?: string; delta?: string; agentSessionId?: string }): void {
@@ -5106,6 +5134,7 @@ export class GroupChatServer {
         const id = this.normalizeClientMessageId(data.id)
         if (!id || !data.delta) return
         this.streamSnapshots.append(roomId, id, member.userId, String(data.agentSessionId).trim(), 'content', String(data.delta))
+        this.publishPluginStream('group.message.delta', roomId, id, member.name, String(data.delta))
         this.nsp.to(roomId).emit('message_stream_delta', {
             roomId,
             id,
@@ -5120,6 +5149,7 @@ export class GroupChatServer {
         const id = this.normalizeClientMessageId(data.id)
         if (!id || !data.delta) return
         this.streamSnapshots.append(roomId, id, member.userId, String(data.agentSessionId).trim(), 'reasoning', String(data.delta))
+        this.publishPluginStream('group.reasoning.delta', roomId, id, member.name, String(data.delta))
         this.nsp.to(roomId).emit('message_reasoning_delta', {
             roomId,
             id,
@@ -5135,6 +5165,7 @@ export class GroupChatServer {
         if (!id) return
         this.streamSnapshots.finish(roomId, id, member.userId)
         this.nsp.to(roomId).emit('message_stream_end', { roomId, id })
+        this.publishPluginStream('group.message.completed', roomId, id, member.name)
     }
 
     private handleTyping(socket: Socket, data: { roomId?: string }): void {
@@ -5280,6 +5311,7 @@ export class GroupChatServer {
                 : null
             if (agent) this.clearRoomAgentActivities(roomId, agent.id)
             this.nsp.to(roomId).emit('context_status', { roomId, agentName, status: 'ready' })
+            this.publishPluginStream('group.run.stopped', roomId, '', agentName, undefined, activeGeneration?.runId)
             ack?.({ ok: true })
         } catch (err: any) {
             await Promise.all([
@@ -5349,6 +5381,7 @@ export class GroupChatServer {
             totalTokens: retracted.totalTokens,
             lastActiveAt: retracted.lastActiveAt,
         })
+        this.nsp.to(roomId).emit('room_summary_updated', this.roomSummaryService.getState(roomId))
         this.broadcastExecutionQueue(roomId)
         this.nsp.to(roomId).emit('room_updated', {
             roomId,

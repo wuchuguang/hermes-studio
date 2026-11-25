@@ -1,4 +1,10 @@
+import { restoreStudioModelTarget } from '../modules/studio/public/model-target-store'
+import { gatewayToken } from '../modules/studio/public/model-gateway-adapters'
 import { registerDesktopBrowserRelay } from '../modules/studio/sockets/desktop-browser'
+import { registerPluginSessions } from '../modules/studio/sockets/plugin-sessions'
+import { getPluginManager, startPluginHost, stopPluginHost } from '../modules/studio/services/plugins/host'
+import { createPluginHttpMiddleware } from '../modules/studio/services/plugins/http'
+import { registerPluginMcpSync } from './plugin-mcp'
 import { setupMobileTerminal } from '../modules/hermes/sockets/mobile-terminal'
 import { getSessionMetadata as getTerminalSessionMetadata } from '../modules/studio/public/sessions'
 import Koa from 'koa'
@@ -52,6 +58,7 @@ import { setupGlobalEkkoAgent } from './ekko'
 import { injectManagedEkkoMcpServers } from '../modules/ekko/services/mcp'
 import { WorkflowSocketServer } from '../modules/studio/sockets/workflow'
 import { PetStateSocketServer } from '../modules/studio/sockets/pet-state'
+import { PersonPresenceSocketServer } from '../modules/studio/sockets/person-presence'
 import { logger } from '../modules/studio/public/logging'
 import { createStaticCompressionMiddleware } from '../modules/studio/middleware/static-compression'
 import { getStaticCacheControl, SPA_ENTRY_CACHE_CONTROL } from '../modules/studio/middleware/static-cache'
@@ -66,11 +73,8 @@ import type { AdditionalShutdownStep, ShutdownHandler } from './lifecycle'
 import { createCodexProxyRequestBodyParser, createRequestBodyParser } from '../modules/studio/middleware/request-body-parser'
 import {
   getCodingAgentsStatus,
-  migratePersistedPiRuntimeMcpConfigs,
-  restorePersistedCodexProxyTargets,
-  restorePersistedPiProxyTargets,
 } from './coding-agents'
-import { isAuthorizedCodexProxyRequest } from '../modules/coding-agents/services/codex/proxy'
+import { isAuthorizedCodexProxyRequest } from '../modules/coding-agents/public/model-gateway'
 import {
   configurePreferredHermesRuntime,
   readLockedDesktopHermesSelection,
@@ -423,33 +427,6 @@ export async function bootstrap() {
   }
 
   try {
-    const migratedPiMcpConfigs = await migratePersistedPiRuntimeMcpConfigs()
-    if (migratedPiMcpConfigs > 0) {
-      console.log(`[bootstrap] migrated ${migratedPiMcpConfigs} persisted Pi MCP runtime config(s) to proxy mode`)
-    }
-  } catch (err) {
-    logger.warn(err, '[bootstrap] failed to migrate persisted Pi MCP runtime configs')
-  }
-
-  try {
-    const restoredCodexProxyTargets = await restorePersistedCodexProxyTargets()
-    if (restoredCodexProxyTargets > 0) {
-      console.log(`[bootstrap] restored ${restoredCodexProxyTargets} persisted Codex/Grok proxy target(s)`)
-    }
-  } catch (err) {
-    logger.warn(err, '[bootstrap] failed to restore persisted Codex/Grok proxy targets')
-  }
-
-  try {
-    const restoredPiProxyTargets = await restorePersistedPiProxyTargets()
-    if (restoredPiProxyTargets > 0) {
-      console.log(`[bootstrap] restored ${restoredPiProxyTargets} persisted Pi proxy target(s)`)
-    }
-  } catch (err) {
-    logger.warn(err, '[bootstrap] failed to restore persisted Pi proxy targets')
-  }
-
-  try {
     const ekkoSetup = setupGlobalEkkoAgent()
     try {
       const injection = injectManagedEkkoMcpServers(ekkoSetup)
@@ -469,6 +446,9 @@ export async function bootstrap() {
     logger.error(err, '[bootstrap] ekko-agent setup failed; continuing with Ekko unavailable')
     console.error('[bootstrap] ekko-agent setup failed; continuing without Ekko:', err instanceof Error ? err.message : err)
   }
+
+  const releasePluginMcpSync = registerPluginMcpSync()
+  additionalShutdownSteps.push({ name: 'Plugin MCP synchronization', close: releasePluginMcpSync })
 
   agentBridgeManager = getAgentBridgeManager()
   if (!isDesktopRuntime()) {
@@ -492,11 +472,16 @@ export async function bootstrap() {
   // Codex can replay inline images from its native thread. Accept a bounded,
   // authenticated request here so the proxy can remove historical image data
   // before dispatching to any provider API mode.
-  app.use(createCodexProxyRequestBodyParser(isAuthorizedCodexProxyRequest))
+  app.use(createCodexProxyRequestBodyParser(async ctx => {
+    if (isAuthorizedCodexProxyRequest(ctx)) return true
+    await restoreStudioModelTarget(gatewayToken(ctx))
+    return isAuthorizedCodexProxyRequest(ctx)
+  }))
   app.use(dshPluginUi.middleware)
   // Raise body limits above the default 1mb: profile avatars and MiMo voice-clone
   // reference audio are posted as base64 data URLs before reaching handlers.
   app.use(createRequestBodyParser())
+  app.use(createPluginHttpMiddleware(getPluginManager))
   console.log('[bootstrap] cors + bodyParser registered')
 
   registerReadinessRoute(app)
@@ -547,6 +532,10 @@ export async function bootstrap() {
   // Start server using the configured bind host. Default is IPv4 for WSL stability.
   const listenResult = await listenWithFallback(app, config.port, config.host)
   server = listenResult.primary
+  if (isDesktopRuntime() && typeof process.send === 'function' && process.connected) {
+    const address = server.address()
+    if (address && typeof address === 'object') process.send({ type: 'hermes-desktop:listening', port: address.port })
+  }
   servers.splice(0, servers.length, ...listenResult.servers)
   console.log('[bootstrap] app.listen called')
   // The Desktop shell only needs registered HTTP routes and static assets before
@@ -614,7 +603,6 @@ export async function bootstrap() {
     name: 'Group agent outbound relay',
     close: () => groupAgentOutboundRelayManager.shutdown(),
   })
-  void groupAgentOutboundRelayManager.restore()
 
   // A process restart loses in-memory scheduler, approval, and runner ownership.
   // Persist a fail-closed terminal state before exposing workflow sockets, then abort
@@ -625,8 +613,15 @@ export async function bootstrap() {
     logger.warn('Recovered %d orphaned workflow runs and aborted %d sessions', recoveredWorkflows.runs, recoveredWorkflows.sessions)
   }
   const { getWorkflowScheduleService } = await import('../modules/studio/services/workflow/schedule')
+  // Restore plugin actions before schedulers or restored agents can invoke them.
+  await startPluginHost(loopbackBaseUrl)
+  additionalShutdownSteps.push({ name: 'Studio plugins', close: stopPluginHost })
+  void groupAgentOutboundRelayManager.restore()
   const workflowScheduleService = getWorkflowScheduleService()
   workflowScheduleService.start()
+  const { startPersonWork, stopPersonWork } = await import('../modules/studio/services/person/runner')
+  startPersonWork()
+  additionalShutdownSteps.push({ name: 'Person task runtime', close: stopPersonWork })
   additionalShutdownSteps.push({
     name: 'Workflow scheduler',
     close: () => workflowScheduleService.stop(),
@@ -641,7 +636,11 @@ export async function bootstrap() {
 
   petStateSocketServer = new PetStateSocketServer(activeGroupChatServer.getIO())
   petStateSocketServer.init()
+  const personPresenceServer = new PersonPresenceSocketServer(activeGroupChatServer.getIO())
+  personPresenceServer.init()
+  additionalShutdownSteps.push({ name: 'Person presence', close: () => personPresenceServer.close() })
   registerDesktopBrowserRelay(activeGroupChatServer.getIO())
+  registerPluginSessions(activeGroupChatServer.getIO())
 
   startGlobalAgentServer(activeGroupChatServer.getIO(), { localBaseUrl: loopbackBaseUrl })
   console.log('[bootstrap] global agent server ready')

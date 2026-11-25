@@ -1,7 +1,9 @@
+import { syncPluginAgentOptions } from '@/utils/agent-options'
+import type { StudioAgent } from '@/api/studio/agents'
 import { request } from './client'
 
-export type AgentStatusId = 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
-export type AgentStatusSource = 'managed-runtime' | 'user-cli' | 'built-in' | 'not-installed'
+export type AgentStatusId = `plugin:${string}/${string}` | 'hermes' | 'ekko-agent' | 'claude-code' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh' | 'cursor' | 'antigravity' | 'qwen' | 'kimi' | 'codebuddy' | 'qoder' | 'copilot' | 'zcode'
+export type AgentStatusSource = 'plugin' | 'managed-runtime' | 'user-cli' | 'built-in' | 'not-installed'
 
 export interface AgentStatusRecord {
   id: AgentStatusId
@@ -10,6 +12,7 @@ export interface AgentStatusRecord {
   path: string
   version: string
   error?: string
+  compatibility?: { pinnedVersion: string; previousVersion: string; adapterRevision: number; verifiedVersion: string }
 }
 
 export interface AgentStatusSnapshot {
@@ -19,6 +22,7 @@ export interface AgentStatusSnapshot {
 }
 
 export interface AgentAvailabilityRecord {
+  available: boolean
   id: AgentStatusId
   installed: boolean
   source: AgentStatusSource
@@ -31,6 +35,8 @@ export interface AgentAvailabilitySnapshot {
 }
 
 export type AgentInstallationState = 'installed' | 'not-installed' | 'unknown'
+
+const AGENT_SNAPSHOT_TIMEOUT_MS = 10_000
 
 const AGENT_STATUS_ALIASES: Record<string, AgentStatusId> = {
   hermes: 'hermes',
@@ -54,6 +60,7 @@ const AGENT_STATUS_ALIASES: Record<string, AgentStatusId> = {
 }
 
 export function resolveAgentStatusId(agent: string): AgentStatusId | null {
+  if (/^plugin:[a-z][a-z0-9._-]*\/[a-z][a-z0-9._-]*$/.test(agent)) return agent as `plugin:${string}/${string}`
   return AGENT_STATUS_ALIASES[agent.trim().toLowerCase()] || null
 }
 
@@ -66,6 +73,15 @@ export function isAgentStatusAvailable(
   const status = snapshot?.agents.find(item => item.id === id)
   if (!status?.installed || status.source === 'not-installed') return false
   return id !== 'hermes' || Boolean(status.path)
+}
+
+/** Uses the server's execution eligibility without exposing local installation paths. */
+export function isAgentAvailable(
+  snapshot: AgentAvailabilitySnapshot | null | undefined,
+  agent: string,
+): boolean {
+  const id = resolveAgentStatusId(agent)
+  return Boolean(id && snapshot?.agents.find(item => item.id === id)?.available === true)
 }
 
 export function agentInstallationState(
@@ -82,9 +98,13 @@ export function agentInstallationState(
 }
 
 export async function fetchAgentAvailabilitySnapshot(): Promise<AgentAvailabilitySnapshot> {
-  return request<AgentAvailabilitySnapshot>('/api/agents/availability')
+  const value = await request<AgentAvailabilitySnapshot>('/api/agents/availability', { signal: AbortSignal.timeout(AGENT_SNAPSHOT_TIMEOUT_MS) })
+  syncPluginAgentOptions((value.agents || []).filter(agent => agent.id.startsWith('plugin:')).map(agent => ({ ...agent, origin: 'plugin' })) as unknown as StudioAgent[])
+  return value
 }
 
 export async function fetchAgentStatusSnapshot(): Promise<AgentStatusSnapshot> {
-  return request<AgentStatusSnapshot>('/api/agents/status')
+  const value = await request<AgentStatusSnapshot>('/api/agents/status', { signal: AbortSignal.timeout(AGENT_SNAPSHOT_TIMEOUT_MS) })
+  syncPluginAgentOptions((value.agents || []).filter(agent => agent.id.startsWith('plugin:')).map(agent => ({ ...agent, origin: 'plugin' })) as unknown as StudioAgent[])
+  return value
 }

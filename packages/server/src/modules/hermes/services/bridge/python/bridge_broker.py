@@ -7,6 +7,7 @@ import socket
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -175,19 +176,29 @@ class BridgeBroker:
                 key = self._normalize_worker_key(profile, req.get("worker_key") if "worker_key" in req else None)
             worker = self._workers.get(key or profile)
 
+        not_loaded = {"ok": True, "session_id": session_id, "exists": False, "running": False, "loaded": False}
         if worker is None or not getattr(worker, "running", False):
-            return {"ok": True, "session_id": session_id, "exists": False, "running": False, "loaded": False}
+            return dict(not_loaded)
 
         forwarded = dict(req)
         forwarded["action"] = "status"
         forwarded["profile"] = profile
         forwarded.pop("worker_key", None)
         try:
-            resp = worker.request(forwarded, self._worker_request_timeout(req))
+            resp = worker.request(forwarded, self._worker_request_timeout(req), start_if_needed=False)
+            if resp.get("skipped"):
+                return dict(not_loaded)
             if resp.get("exists") is not False:
                 self._record_response_routes(profile, key or profile, resp)
             resp.setdefault("loaded", True)
             return resp
+        except (FileNotFoundError, ConnectionRefusedError):
+            # The socket vanished or nothing listens on it: the worker exited after the running check.
+            return dict(not_loaded)
+        except OSError as e:
+            # Resets, permission errors, timeouts etc. do not prove the worker or run stopped.
+            # Report the error so callers can stay conservative instead of assuming idle.
+            return {"ok": False, "error": f"worker status unavailable: {e}"}
         except RuntimeError as e:
             return {"ok": False, "error": str(e)}
 
@@ -445,6 +456,21 @@ class BridgeBroker:
         if action == "shutdown":
             self.stop()
             return {"status": "shutting_down"}
+
+        if action == "mcp_plugins_changed":
+            with self._lock:
+                workers = [(key, worker) for key, worker in self._workers.items() if worker.running]
+            def notify(entry):
+                key, worker = entry
+                try:
+                    result = worker.request(req, start_if_needed=False)
+                    return {"worker_key": key, "profile": worker.profile, **result}
+                except Exception as exc:
+                    return {"worker_key": key, "profile": worker.profile, "ok": False, "error": str(exc)}
+            with ThreadPoolExecutor(max_workers=min(8, len(workers)) or 1) as executor:
+                results = list(executor.map(notify, workers))
+            failed = [item for item in results if not item.get("ok")]
+            return {"ok": not failed, "workers": results, **({"error": "; ".join(item.get("error", "Worker notification failed") for item in failed)} if failed else {})}
 
         # ───── MCP Management ─────
         if action.startswith("mcp_"):

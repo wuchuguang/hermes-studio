@@ -17,7 +17,7 @@ const SHELL_REVALIDATE_FILES = new Set(['boot.js', 'manifest.webmanifest', 'sw.j
 
 export function getStaticCacheControl(relativePath: string): string | null {
   const normalizedPath = relativePath.replaceAll('\\', '/').replace(/^\.\//, '')
-  if (normalizedPath === 'index.html') return SPA_ENTRY_CACHE_CONTROL
+  if (normalizedPath === 'index.html' || normalizedPath === 'plugin-frame.html') return SPA_ENTRY_CACHE_CONTROL
   if (normalizedPath.startsWith('assets/')) return IMMUTABLE_ASSET_CACHE_CONTROL
   if (SHELL_REVALIDATE_FILES.has(normalizedPath)) return SHELL_REVALIDATE_CACHE_CONTROL
   if (PUBLIC_ASSET_PREFIXES.some((prefix) => normalizedPath.startsWith(prefix))) {

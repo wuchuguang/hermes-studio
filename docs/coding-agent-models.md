@@ -1,5 +1,35 @@
 # Native Coding Agent model discovery
 
+## Studio provider protocol selection
+
+Scoped chats and BOT selections use Studio's provider catalog. An explicit
+selection keeps its saved protocol; automatic inference never replaces a fixed provider API mode.
+In **Auto (match model)** mode, known provider/endpoint rules take priority.
+Other custom HTTP(S) endpoints use conservative conversation-model defaults:
+numeric GPT conversation families use Responses, and Claude Opus, Sonnet and
+Haiku families use Anthropic Messages. Namespaces are ignored for matching,
+but the original model ID is sent unchanged.
+
+Dedicated image, audio, realtime, transcription, speech, embedding and search
+model names do not receive these generic conversation defaults. Catalog entries
+whose output modalities exclude text are also left unresolved. Unknown aliases
+require manual protocol selection. These defaults do not probe endpoint support
+or guarantee cache hits; use a fixed provider mode or a manual selection when a
+relay requires another protocol.
+
+Switching models recomputes the automatic protocol. Scoped single chats and BOT
+main conversations retain their protocol confirmation rules. BOT execution-agent
+settings inherit a known model or provider protocol without confirmation, and
+reselecting the same model preserves its saved protocol and reasoning effort.
+Saved presets have no protocol provenance, so every valid saved protocol is
+treated as an explicit choice. Without a valid saved choice, unknown or unsupported
+metadata, or a selection event that disagrees with the catalog, requires confirmation;
+cancelling leaves the saved selection unchanged. A per-model map is authoritative:
+missing or null entries do not inherit the provider default. Native Global mode
+retains CLI configuration.
+
+## Native model directory
+
 `GET /api/coding-agents/models` is the single authenticated API for the native
 model directories of all fourteen Coding Agents. It does not read Studio's
 Hermes Profile model picker or start a Studio chat/run. The server's global CLI

@@ -6,6 +6,7 @@ import type {
   AgentToolResult,
 } from './types'
 import { UpdatePlanTool } from './plan'
+import { createSessionTasksToolProvider } from './session-tasks'
 import { createBrowserTools } from './browser'
 import { ComputerUseTool, type ComputerUseToolOptions } from './computer-use'
 import { createClarificationToolProvider } from './clarify'
@@ -76,6 +77,12 @@ export class AgentToolRegistry {
   }
 
   async execute(name: string, input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult> {
+    if (context?.beforeTool) input = await context.beforeTool(name, input)
+    const result = await this.executeAuthorized(name, input, context)
+    return result.ok && context?.afterTool ? context.afterTool(name, input, result) : result
+  }
+
+  private async executeAuthorized(name: string, input: Record<string, unknown>, context?: AgentToolContext): Promise<AgentToolResult> {
     const tool = this.tools.get(name)
     if (!tool) {
       return {
@@ -169,6 +176,7 @@ export function createDefaultToolRegistry(options: DefaultToolRegistryOptions = 
     }))
   }
   registry.registerProvider(createClarificationToolProvider())
+  registry.registerProvider(createSessionTasksToolProvider())
   registry.registerProvider(createMcpToolProvider())
   return registry
 }

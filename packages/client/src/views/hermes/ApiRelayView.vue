@@ -207,7 +207,7 @@ onBeforeUnmount(() => { requestController?.abort() })
   span {
     padding: calc(5px * var(--spacing-scale, 1)) calc(9px * var(--spacing-scale, 1));
     color: $text-secondary;
-    background: $bg-secondary;
+    background: var(--theme-card-bg, $bg-secondary);
     border: var(--border-width, 1px) solid $border-light;
     border-radius: 999px;
     font-size: calc(var(--font-size-base, 14px) * 10 / 14);

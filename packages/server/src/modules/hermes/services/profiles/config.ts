@@ -48,7 +48,7 @@ export const PROVIDER_ENV_MAP: Record<string, { api_key_env: string; base_url_en
   nous: { api_key_env: '', base_url_env: '' },
   'openai-codex': { api_key_env: '', base_url_env: '' },
   'openai-api': { api_key_env: 'OPENAI_API_KEY', base_url_env: 'OPENAI_BASE_URL' },
-  copilot: { api_key_env: 'GITHUB_TOKEN', base_url_env: '' },
+  copilot: { api_key_env: 'COPILOT_GITHUB_TOKEN', base_url_env: '' },
   longcat: { api_key_env: '', base_url_env: '' },
   'tencent-tokenhub': { api_key_env: 'TENCENT_TOKENHUB_API_KEY', base_url_env: 'TOKENHUB_BASE_URL' },
 }
@@ -149,6 +149,10 @@ async function saveEnvValueAtPath(envPath: string, key: string, value: string): 
   try { await chmod(envPath, 0o600) } catch { /* ignore */ }
 }
 
+export async function saveEnvValueInHome(hermesHome: string, key: string, value: string): Promise<void> {
+  await saveEnvValueAtPath(join(hermesHome, '.env'), key, value)
+}
+
 export async function saveEnvValue(key: string, value: string): Promise<void> {
   await saveEnvValueAtPath(getActiveEnvPath(), key, value)
 }
@@ -235,14 +239,13 @@ export async function fetchProviderModels(baseUrl: string, apiKey: string, freeO
       logger.warn('available-models %s returned %d', modelsUrl, res.status)
       return []
     }
-    const data = await res.json() as { data?: Array<{ id: string }>; models?: Array<{ id?: string; slug?: string; name?: string }> }
-    // 兼容 OpenAI { data: [...] } 与 Codex 目录 { models: [...] } 两种格式
-    const rawList = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : null)
-    if (!rawList) {
+    const data = await res.json() as { data?: Array<{ id?: unknown; slug?: unknown }>; models?: Array<{ id?: unknown; slug?: unknown }> }
+    const rawModels = Array.isArray(data?.data) ? data.data : data?.models
+    if (!Array.isArray(rawModels)) {
       logger.warn('available-models %s returned unexpected format', modelsUrl)
       return []
     }
-    let models = rawList.map(m => (m as { id?: string }).id || (m as { slug?: string }).slug || (m as { name?: string }).name || '')
+    let models = rawModels.map(m => String(m?.id || m?.slug || (m as { name?: unknown })?.name || '').trim()).filter(Boolean)
     // Gemini returns model IDs with "models/" prefix. Strip to avoid double
     // prefix when Hermes native adapter constructs .../models/{model}:generateContent
     if (base.includes('generativelanguage.googleapis.com')) {

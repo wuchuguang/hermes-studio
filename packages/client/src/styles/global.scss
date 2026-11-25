@@ -2,6 +2,8 @@
 @use 'code-block';
 @use 'mobile';
 @use 'theme-surfaces';
+@use 'scrollbars';
+
 @font-face {
   font-family: 'Comic Neue';
   font-style: normal;
@@ -212,35 +214,6 @@ a {
   &:hover {
     color: $accent-hover;
   }
-}
-
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-  background: transparent;
-}
-
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-track-piece {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: $border-color;
-  border-radius: var(--radius-component, 3px);
-
-  &:hover {
-    background: $text-muted;
-  }
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-* {
-  scrollbar-width: thin;
-  scrollbar-color: $border-color transparent;
 }
 
 ::selection {
