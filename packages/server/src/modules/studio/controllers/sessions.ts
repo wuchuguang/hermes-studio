@@ -2581,11 +2581,15 @@ export async function getConversationMessagesPaginated(ctx: any) {
 
   const { getSessionDetailPaginated } = await import('../public/sessions')
   const localResult = getSessionDetailPaginated(ctx.params.id, offset, limit)
-  const result = localResult && (!profile || localResult.session.profile === profile)
-    ? localResult
-    : isHermesAgentAvailable()
-      ? await getHermesSessionDetailPaginatedForProfile(ctx.params.id, profile || 'default', offset, limit)
-      : null
+  let result = localResult && (!profile || localResult.session.profile === profile) ? localResult : null
+  if (result && denySessionAccess(ctx, result.session)) return
+  if (isHermesAgentAvailable()) {
+    const historyProfile = profile || result?.session.profile || 'default'
+    const historyCount = await getHermesSessionMessageCount(ctx.params.id, historyProfile)
+    if (!result || (historyCount != null && historyCount > result.total)) {
+      result = await getHermesSessionDetailPaginatedForProfile(ctx.params.id, historyProfile, offset, limit) ?? result
+    }
+  }
 
   if (!result) {
     ctx.status = 404
@@ -2597,7 +2601,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const continuation = await getCompressionContinuation(session.id, profile || undefined)
   const timeline = ctx.query.timeline === 'true' && isPersonSession(session.id)
     ? personConversationTimeline(ctx.state.user.id, session.id, { before: ctx.query.before, limit: ctx.query.limit }) : null
-  const pageMessages = timeline?.messages || result.messages
+  const pageMessages: Array<(typeof result.messages)[number] | NonNullable<typeof timeline>['messages'][number]> = timeline?.messages || result.messages
   const assistantMessageIds = pageMessages
     .filter((message: any) => String(message.display_role || message.role || '') === 'assistant')
     .map((message: any) => message.id)

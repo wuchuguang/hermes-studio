@@ -6,13 +6,10 @@
  *   1. heartbeat a registry entry for each session this server is running
  *   2. clear studio entries whose local run has ended (also cleans crash leftovers)
  *   3. honor cancel requests on own runs (cooperative cross-client cancel)
- *   4. periodically scan the shared state.dbs for sessions growing without us
- *      (heuristic: a desktop/gateway run is appending messages right now)
- *   5. broadcast transitions to every connected client
+ *   4. broadcast live registry transitions to connected clients
  *
- * The desktop runtime joins the same registry file (~/.hermes/state/session-runs.json);
- * until its side lands, desktop runs are detected via the growth heuristic only,
- * and a web cancel is delivered as a registry cancel request.
+ * The desktop runtime publishes its running turns to the shared registry.
+ * Message timestamps cannot distinguish an active run from a completed reply.
  */
 import { randomUUID } from 'crypto'
 import { logger } from '../../public/logging'
@@ -25,12 +22,8 @@ import {
   markSessionRunStarted,
   type SessionRunEntry,
 } from '../session-run-registry'
-import { listActiveSessionIdsSince } from '../../../hermes/services/history/sessions-db'
-
 const TICK_MS = 2500
 const ENTRY_FRESH_MS = 15000
-const ACTIVITY_WINDOW_SECONDS = 45
-const HEURISTIC_EVERY_TICKS = 4
 
 interface ExternalRunSyncDeps {
   nsp: { emit: (event: string, payload: unknown) => void }
@@ -42,24 +35,20 @@ interface ExternalRunSyncDeps {
 let syncTimer: ReturnType<typeof setInterval> | null = null
 let lastRunningIds = new Set<string>()
 let lastWorkingIds = new Set<string>()
-let heuristicActiveIds = new Set<string>()
 
-/** Sessions running outside this server (foreign registry entries + activity heuristic). */
+/** Sessions with a current heartbeat from an external runtime. */
 export function getExternallyRunningSessionIds(): Set<string> {
   const ids = new Set<string>()
   for (const [sessionId, entry] of Object.entries(freshSessionRunEntries(ENTRY_FRESH_MS))) {
-    if (entry.origin !== 'studio') ids.add(sessionId)
+    if (entry.origin !== 'studio' && !entry.inferred) ids.add(sessionId)
   }
-  for (const sessionId of heuristicActiveIds) ids.add(sessionId)
   return ids
 }
 
 export function startExternalRunSync(deps: ExternalRunSyncDeps): void {
   if (syncTimer) return
-  let tick = 0
   syncTimer = setInterval(() => {
-    tick += 1
-    void runTick(deps, tick).catch((err) => logger.warn(err, '[external-run-sync] tick failed'))
+    void runTick(deps).catch((err) => logger.warn(err, '[external-run-sync] tick failed'))
   }, TICK_MS)
   syncTimer.unref?.()
 }
@@ -69,7 +58,7 @@ export function stopExternalRunSync(): void {
   syncTimer = null
 }
 
-async function runTick(deps: ExternalRunSyncDeps, tick: number): Promise<void> {
+async function runTick(deps: ExternalRunSyncDeps): Promise<void> {
   const sessionMap = deps.getSessionMap()
 
   // 1) Heartbeat own runs. A not-working → working transition is a NEW run: publish a
@@ -110,18 +99,7 @@ async function runTick(deps: ExternalRunSyncDeps, tick: number): Promise<void> {
     acknowledgeSessionRunCancel(sessionId)
   }
 
-  // 4) Heuristic: sessions growing in state.db without this server running them.
-  if (tick % HEURISTIC_EVERY_TICKS === 1) {
-    try {
-      const since = Math.floor(Date.now() / 1000) - ACTIVITY_WINDOW_SECONDS
-      const ids = await listActiveSessionIdsSince(since)
-      heuristicActiveIds = new Set(ids.filter((sessionId) => !deps.isSessionRunning(sessionId)))
-    } catch (err) {
-      logger.warn(err, '[external-run-sync] activity scan failed')
-    }
-  }
-
-  // 5) Broadcast transitions.
+  // 4) Broadcast transitions.
   const running = getExternallyRunningSessionIds()
   const changes: Array<{ session_id: string; running: boolean }> = []
   for (const sessionId of running) {

@@ -180,6 +180,7 @@ export interface ResumeSessionPayload {
   messagePageLimit?: number
   hasMoreBefore?: boolean
   isWorking: boolean
+  external_running?: boolean
   isAborting?: boolean
   /** Epoch ms the active run began; absent on servers that predate it. */
   runStartedAt?: number
@@ -875,6 +876,12 @@ function openChatSocket(profile: string, transport: ChatRunTransport): Socket {
 export type SessionRunExternalChange = { session_id: string; running: boolean }
 type SessionRunExternalListener = (changes: SessionRunExternalChange[]) => void
 const sessionRunExternalListeners = new Set<SessionRunExternalListener>()
+const chatRunReconnectListeners = new Set<(transport: ChatRunTransport) => void>()
+
+export function onChatRunReconnect(listener: (transport: ChatRunTransport) => void): () => void {
+  chatRunReconnectListeners.add(listener)
+  return () => { chatRunReconnectListeners.delete(listener) }
+}
 
 /** Subscribe to cross-process run-state transitions broadcast by the server. */
 export function onSessionRunExternalChange(listener: SessionRunExternalListener): () => void {
@@ -928,6 +935,12 @@ export function connectChatRun(requestedProfile?: string | null, transport: Chat
   // Retained callbacks from a replaced/invalidated socket must not dispatch
   // into handlers registered by a later authenticated session.
   const ownerSocket = chatRunSocket
+  let hasConnected = false
+  ownerSocket.on('connect', () => {
+    if (chatRunSocket !== ownerSocket) return
+    if (hasConnected) for (const listener of chatRunReconnectListeners) listener(transport)
+    hasConnected = true
+  })
   const on = (event: string, handler: (event: RunEvent) => void) => {
     ownerSocket.on(event, (data: RunEvent) => {
       if (chatRunSocket === ownerSocket) handler(data)
@@ -1042,16 +1055,29 @@ export function resumeSession(
   onResumed: (data: ResumeSessionPayload) => void,
   profile?: string | null,
   transport: ChatRunTransport = 'chat-run',
+  signal?: AbortSignal,
 ): Socket {
   const socket = connectChatRun(profile, transport)
 
+  const cleanup = () => {
+    removeSocketListener(socket, 'resumed', handleResumed)
+    removeSocketListener(socket, 'connect', send)
+    signal?.removeEventListener('abort', cleanup)
+  }
   const handleResumed = (data: ResumeSessionPayload) => {
     if (data?.session_id !== sessionId) return
-    removeSocketListener(socket, 'resumed', handleResumed)
+    cleanup()
     onResumed(data)
   }
+  const send = () => {
+    removeSocketListener(socket, 'connect', send)
+    socket.emit('resume', { session_id: sessionId, ...(profile ? { profile } : {}) })
+  }
+  if (signal?.aborted) return socket
   socket.on('resumed', handleResumed)
-  socket.emit('resume', { session_id: sessionId, ...(profile ? { profile } : {}) })
+  signal?.addEventListener('abort', cleanup, { once: true })
+  if (signal && !socket.connected) socket.on('connect', send)
+  else send()
 
   return socket
 }
@@ -1066,7 +1092,7 @@ export function startRunViaSocket(
     onReconnectResume?: (data: ResumeSessionPayload) => void
     transport?: ChatRunTransport
   },
-): { abort: () => void } {
+): { abort: () => void; reconcile?: (snapshot: ResumeSessionPayload) => void } {
   const sid = body.session_id
   if (!sid) {
     throw new Error('session_id is required for startRunViaSocket')
@@ -1095,14 +1121,21 @@ export function startRunViaSocket(
     reconnectResumeHandler = null
   }
 
+  const reconcile = (data: ResumeSessionPayload) => {
+    if (closed || data.session_id !== sid || sessionEventHandlers.get(sid) !== handlers) return
+    clearReconnectResumeHandler()
+    options?.onReconnectResume?.(data)
+    if (!data.isWorking && !data.queueLength && !data.backgroundPending) {
+      closed = true
+      removeTerminalSocketListeners()
+      if (sessionEventHandlers.get(sid) === handlers) sessionEventHandlers.delete(sid)
+    }
+  }
+
   const emitReconnectResume = () => {
     clearReconnectResumeHandler()
     if (options?.onReconnectResume) {
-      reconnectResumeHandler = (data: ResumeSessionPayload) => {
-        clearReconnectResumeHandler()
-        if (closed || data.session_id !== sid) return
-        options.onReconnectResume?.(data)
-      }
+      reconnectResumeHandler = reconcile
       socket.on('resumed', reconnectResumeHandler)
     }
     socket.emit('resume', { session_id: sid, ...(body.profile ? { profile: body.profile } : {}) })
@@ -1292,6 +1325,7 @@ export function startRunViaSocket(
   socket.emit('run', body)
 
   return {
+    reconcile,
     abort: () => {
       if (!closed) {
         socket.emit('abort', { session_id: sid })

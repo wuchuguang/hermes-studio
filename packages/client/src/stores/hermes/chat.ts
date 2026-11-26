@@ -8,7 +8,7 @@ import { normalizeRunUsage, type RunUsageSummary } from '@/utils/run-usage'
 import { mergeTaskPlanMessages, type TaskPlanSnapshot } from '@/utils/task-plan'
 import { applyPersonTimelinePage, applyPersonFlowUpdate, preservePersonTimelineWindow } from '@/utils/person-timeline'
 import type { PendingInboxEvent } from '@/api/studio/pending-inbox'
-import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, onSessionRunExternalChange, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
+import { startRunViaSocket, onUnobservedRunStarted, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, onChatRunReconnect, respondToolApproval, onPeerUserMessage, onPersonUpdated, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, onRunUsageUpdated, respondClarify, onSessionRunExternalChange, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
 import { archiveSession as archiveSessionApi, cancelSessionRun, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { onAuthInvalidated } from '@/api/auth-invalidation'
@@ -1373,7 +1373,7 @@ function createChatState(scopedSessionId?: string) {
   const sessions = ref<Session[]>([])
   const activeSessionId = ref<string | null>(null)
   const focusMessageId = ref<string | null>(null)
-  const streamStates = ref<Map<string, { abort: () => void }>>(new Map())
+  const streamStates = ref<Map<string, { abort: () => void; reconcile?: (snapshot: ResumeSessionPayload) => void }>>(new Map())
   const pendingAttachmentSends = new Map<string, { controller: AbortController; messageId: string; content: string; attachments: Attachment[] }>()
   const cancelledAttachmentDrafts = ref(new Map<string, { content: string; attachments: Attachment[] }>())
   /** sessionId → server-reported isWorking status */
@@ -1381,6 +1381,7 @@ function createChatState(scopedSessionId?: string) {
   /** Sessions actively running outside this server (desktop/gateway runs). */
   const externallyRunning = ref<Set<string>>(new Set())
   function setSessionExternallyRunning(sessionId: string, running: boolean) {
+    if (externallyRunning.value.has(sessionId) === running) return
     const next = new Set(externallyRunning.value)
     if (running) next.add(sessionId)
     else next.delete(sessionId)
@@ -1873,6 +1874,7 @@ function createChatState(scopedSessionId?: string) {
       const list = await fetchRuntimeSessions(profile)
       if (requestSequence !== loadSessionsRequestSequence) return
       const fresh = list.map(mapHermesSession)
+      for (const session of fresh) setSessionExternallyRunning(session.id, !!session.externalRunning)
       const selectionChanged = selectionSequence !== activeSelectionSequence
       // Search can select a session outside the sidebar's first page. Keep
       // that selection when mounting its route, including title-only hits.
@@ -1968,9 +1970,18 @@ function createChatState(scopedSessionId?: string) {
     if (isStreaming.value) return
     if (isLoadingSessions.value) return
     try {
-      const list = await fetchRuntimeSessions(profile ?? sessionProfileFilter.value)
+      const generation = runtimeGeneration
+      const loadSequence = loadSessionsRequestSequence
+      const filter = sessionProfileFilter.value
+      const externalAtRequest = externallyRunning.value
+      const list = await fetchRuntimeSessions(profile ?? filter)
+      if (generation !== runtimeGeneration || loadSequence !== loadSessionsRequestSequence || filter !== sessionProfileFilter.value) return
       const incoming = list.map(mapHermesSession)
-      for (const fresh of incoming) setSessionExternallyRunning(fresh.id, !!fresh.externalRunning)
+      for (const fresh of incoming) {
+        if (externalAtRequest.has(fresh.id) === externallyRunning.value.has(fresh.id)) {
+          setSessionExternallyRunning(fresh.id, !!fresh.externalRunning)
+        }
+      }
       const existingById = new Map(sessions.value.map(s => [s.id, s]))
       const incomingIds = new Set(incoming.map(s => s.id))
 
@@ -1980,6 +1991,14 @@ function createChatState(scopedSessionId?: string) {
       for (const fresh of incoming) {
         const existing = existingById.get(fresh.id)
         if (existing) {
+          const activeHistoryChanged = existing.id === activeSessionId.value && existing.messagesLoaded
+            && (fresh.updatedAt !== existing.updatedAt || fresh.messageCount !== existing.messageCount)
+          if (activeHistoryChanged && !existing.personFlows?.timeline?.has_newer
+            && !isSessionWorking(existing.id) && !isSessionExternallyRunning(existing.id) && !focusMessageId.value) {
+            void refreshActiveSession({ canApply: () => activeSessionId.value === existing.id
+              && !existing.personFlows?.timeline?.has_newer && !isSessionWorking(existing.id)
+              && !isSessionExternallyRunning(existing.id) && !focusMessageId.value })
+          }
           // Update scalar metadata in-place; never touch runtime/scroll state
           // (messages, loadedMessageCount, hasMoreBefore, contextTokens).
           existing.title = fresh.title
@@ -2243,6 +2262,7 @@ function createChatState(scopedSessionId?: string) {
             resolve()
             return
           }
+          setSessionExternallyRunning(sessionId, !!data.external_running)
           if (data.isWorking) {
             serverWorking.value.add(sessionId)
           } else {
@@ -4162,9 +4182,10 @@ function createChatState(scopedSessionId?: string) {
         const target = sessions.value.find(s => s.id === sid)
         if (!target) return
 
+        setSessionExternallyRunning(sid, !!data.external_running)
         if (data.isWorking) serverWorking.value.add(sid)
         else serverWorking.value.delete(sid)
-        applyResumedRunActivity(sid, data as any)
+        applyResumedRunActivity(sid, data)
 
         if (data.queueLength && data.queueLength > 0) {
           queueLengths.value.set(sid, data.queueLength)
@@ -5733,57 +5754,112 @@ function createChatState(scopedSessionId?: string) {
     }
   }
 
-  // Tab visibility: re-sync when returning to foreground
+  // Mobile browsers can suspend the socket while a run is still marked active locally.
   if (typeof document !== 'undefined') {
-    const onVisibilityChange = () => {
-      if (!scopedSessionId && document.visibilityState === 'visible' && !isStreaming.value) {
-        // Live-sync the session list so sessions created elsewhere (CLI,
-        // Telegram, another device) appear without a manual reload.
-        void refreshSessionListOnly()
-      }
-      if (document.visibilityState === 'visible' && activeSessionId.value && !isStreaming.value) {
-        const sid = activeSessionId.value
-        if (sid && !streamStates.value.has(sid)) {
-          // Re-load messages via resume (server loads from DB)
-          const generation = runtimeGeneration
-          resumeSession(sid, (data) => {
-            if (generation !== runtimeGeneration || data.session_id !== sid || activeSessionId.value !== sid) return
-            if (data.isWorking) {
-              serverWorking.value.add(sid)
-            } else {
-              serverWorking.value.delete(sid)
-            }
-            applyResumedRunActivity(sid, data as any)
-            if (data.isAborting) {
-              setAbortState(sid, { aborting: true, synced: null })
-            } else if (!data.isWorking) {
-              setAbortState(sid, null)
-            }
-            if (!data.isWorking) setCompressionState(sid, null)
-            applyResumedSessionSettings(data)
-            if (activeSession.value) applySessionTokenUsage(activeSession.value, data)
-            if (Array.isArray(data.messages) && activeSession.value && !preservePersonTimelineWindow(activeSession.value,data.personFlows)) {
-              if (typeof data.workspace === 'string') {
-                activeSession.value.workspace = data.workspace.trim() || null
-                activeSession.value.isLocalOnly = false
-              }
-              activeSession.value.messages = mapHermesMessages(data.messages as any[], data.taskPlans, activeSession.value.messages)
-              activeSession.value.messagesLoaded = true
-              restorePersistedSubagentStreams(sid)
-              setWorkspaceRunChanges(sid, data.workspaceRunChanges || [])
-              activeSession.value.loadedMessageCount = data.messageLoadedCount ?? data.messages.length
-              activeSession.value.messageTotal = data.messageTotal ?? activeSession.value.messageCount ?? activeSession.value.loadedMessageCount
-              activeSession.value.messageCount = activeSession.value.messageTotal
-              activeSession.value.hasMoreBefore = data.hasMoreBefore ?? activeSession.value.loadedMessageCount < activeSession.value.messageTotal
-              if (!applyPersonTimelinePage(activeSession.value,data.personFlows,activeSession.value.messages) && data.personFlows) activeSession.value.personFlows=data.personFlows
-            }
-            resumeServerWorkingRun(sid, (data.backgroundPending || 0) > 0, !data.isWorking)
-          }, activeSession.value?.profile, runtimeTransport())
-        }
-      }
+    let pendingResume: AbortController | undefined
+    let resumeTimeout: number | undefined
+    function clearForegroundResume() {
+      pendingResume?.abort()
+      pendingResume = undefined
+      window.clearTimeout(resumeTimeout)
     }
+
+    function synchronizeForeground(reconnected = false) {
+      if (document.visibilityState !== 'visible' || pendingResume) return
+      const refreshListAfterResume = isStreaming.value
+      if (!scopedSessionId && sessionsLoaded.value && !refreshListAfterResume) void refreshSessionListOnly()
+      const target = activeSession.value
+      if (!target || target.isLocalOnly || isLoadingMessages.value || pendingAttachmentSends.has(target.id)) return
+
+      const sid = target.id
+      const generation = runtimeGeneration
+      const selection = activeSelectionSequence
+      const stream = streamStates.value.get(sid)
+      if (reconnected && stream?.reconcile) return // The sending socket already requests its own snapshot.
+      const startedAt = runStartedAt.value.get(sid)
+      const historyRevision = messageHistoryRevisions.get(sid)
+      const resumed = new AbortController()
+      pendingResume = resumed
+      resumeTimeout = window.setTimeout(clearForegroundResume, 8000)
+      resumeSession(sid, (data) => {
+        clearForegroundResume()
+        if (generation !== runtimeGeneration || selection !== activeSelectionSequence || activeSessionId.value !== sid) return
+        if (streamStates.value.get(sid) !== stream || runStartedAt.value.get(sid) !== startedAt
+          || messageHistoryRevisions.get(sid) !== historyRevision) return
+        if (stream?.reconcile && !focusMessageId.value) {
+          stream.reconcile(data)
+          if (refreshListAfterResume && !isStreaming.value && !scopedSessionId) void refreshSessionListOnly()
+          return
+        }
+        setSessionExternallyRunning(sid, !!data.external_running)
+        applyResumedRunActivity(sid, data)
+
+        // An attached local stream owns its in-progress transcript. A finished
+        // run may have missed its terminal event while the page was suspended.
+        if (data.isWorking) {
+          serverWorking.value.add(sid)
+          if (stream) return
+        } else {
+          serverWorking.value.delete(sid)
+          if (stream && !data.queueLength) {
+            streamStates.value.delete(sid)
+            unregisterSessionHandlers(sid)
+          } else if (stream) return
+        }
+
+        setAbortState(sid, data.isAborting ? { aborting: true, synced: null } : null)
+        if (!data.isWorking) setCompressionState(sid, null)
+        if (data.queueLength) queueLengths.value.set(sid, data.queueLength)
+        else queueLengths.value.delete(sid)
+        if (Array.isArray(data.queueMessages) || !data.queueLength) {
+          replaceQueuedUserMessages(sid, normalizeQueuedUserMessages(data.queueMessages || []))
+        }
+        replaceQueueInsertionState(sid, data.queueInsertion)
+        applyResumedSessionSettings(data)
+        const current = activeSession.value
+        if (current) {
+          applySessionTokenUsage(current, data)
+          if (Array.isArray(data.messages) && !focusMessageId.value && !preservePersonTimelineWindow(current, data.personFlows)) {
+            if (typeof data.workspace === 'string') current.workspace = data.workspace.trim() || null
+            current.messages = mapHermesMessages(data.messages, data.taskPlans, current.messages)
+            current.messagesLoaded = true
+            restorePersistedSubagentStreams(sid)
+            setWorkspaceRunChanges(sid, data.workspaceRunChanges || [])
+            current.loadedMessageCount = data.messageLoadedCount ?? data.messages.length
+            current.messageTotal = data.messageTotal ?? current.messageCount ?? current.loadedMessageCount
+            current.messageCount = current.messageTotal
+            current.hasMoreBefore = data.hasMoreBefore ?? current.loadedMessageCount < current.messageTotal
+            if (!applyPersonTimelinePage(current, data.personFlows, current.messages) && data.personFlows) current.personFlows = data.personFlows
+          }
+        }
+        resumeServerWorkingRun(sid, (data.backgroundPending || 0) > 0, !data.isWorking)
+        if (refreshListAfterResume && !isStreaming.value && !scopedSessionId) void refreshSessionListOnly()
+      }, target.profile, runtimeTransport(), resumed.signal)
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') synchronizeForeground()
+      else clearForegroundResume()
+    }
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) synchronizeForeground()
+    }
+    const stopReconnectListener = onChatRunReconnect(transport => {
+      if (transport !== runtimeTransport() || (scopedSessionId && activeSessionId.value !== scopedSessionId)) return
+      clearForegroundResume()
+      synchronizeForeground(true)
+    })
+    const onOnline = () => synchronizeForeground()
     document.addEventListener('visibilitychange', onVisibilityChange)
-    onScopeDispose(() => document.removeEventListener('visibilitychange', onVisibilityChange))
+    window.addEventListener('pageshow', onPageShow)
+    window.addEventListener('online', onOnline)
+    onScopeDispose(() => {
+      clearForegroundResume()
+      stopReconnectListener()
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('online', onOnline)
+    })
   }
 
   // Mild background polling for live session-list sync (covers sessions created
@@ -5954,16 +6030,30 @@ function createChatState(scopedSessionId?: string) {
 
   // Cross-process run-state sync: react to external-run transitions broadcast
   // by the server and stream the active desktop run's messages while it grows.
-  onSessionRunExternalChange(changes => {
-    for (const change of changes) setSessionExternallyRunning(change.session_id, change.running)
+  const stopExternalRunListener = onSessionRunExternalChange(changes => {
+    for (const change of changes) {
+      const wasRunning = externallyRunning.value.has(change.session_id)
+      setSessionExternallyRunning(change.session_id, change.running)
+      if (!change.running && wasRunning && activeSessionId.value === change.session_id
+        && !activeSession.value?.personFlows?.timeline?.has_newer && !isSessionWorking(change.session_id) && !focusMessageId.value) {
+        void refreshActiveSession({ canApply: () => activeSessionId.value === change.session_id
+          && !activeSession.value?.personFlows?.timeline?.has_newer && !isSessionWorking(change.session_id)
+          && !isSessionExternallyRunning(change.session_id) && !focusMessageId.value })
+      }
+    }
   })
-  setInterval(() => {
+  const externalRunTimer = setInterval(() => {
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
     const sid = activeSessionId.value
     if (!sid || !externallyRunning.value.has(sid)) return
     if (isAborting.value) return
-    void refreshActiveSession({ latest: true }).catch(() => {})
+    void refreshActiveSession({ latest: true, canApply: () => activeSessionId.value === sid
+      && externallyRunning.value.has(sid) && !streamStates.value.has(sid) && !serverWorking.value.has(sid) })
   }, 4000)
+  onScopeDispose(() => {
+    stopExternalRunListener()
+    clearInterval(externalRunTimer)
+  })
 
   return {
     sessions,
