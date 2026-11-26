@@ -69,6 +69,7 @@ import RealtimeVoiceStage from "./RealtimeVoiceStage.vue";
 import ConversationMonitorPane from "./ConversationMonitorPane.vue";
 import MessageList from "./MessageList.vue";
 import SessionListItem from "./SessionListItem.vue";
+import SessionListSidebar from "./SessionListSidebar.vue";
 import ListActionsMenu from "@/components/layout/ListActionsMenu.vue";
 import OutlinePanel from "./OutlinePanel.vue";
 import ChatToolsPanel from "./ChatToolsPanel.vue";
@@ -4350,54 +4351,6 @@ watch([isEmptySingleChat, () => route.fullPath], ([empty]) => {
   margin-top: 6px;
   font-size: 11px;
   color: $text-muted;
-}
-
-.session-list {
-  width: $sidebar-width;
-  min-height: 0;
-  align-self: stretch;
-  margin: 0;
-  background: $bg-sidebar-surface;
-  border-inline-end: 1px solid $border-color;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  transition:
-    width $transition-normal,
-    opacity $transition-normal;
-  overflow: hidden;
-
-  &--navigation .page-sidebar-top {
-    flex: 1;
-    overflow-y: auto;
-  }
-
-  &.collapsed {
-    width: 0;
-    margin-inline-start: 0;
-    margin-inline-end: 0;
-    border: none;
-    box-shadow: none;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  @media (max-width: $breakpoint-mobile) {
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    height: auto;
-    margin: 0;
-    z-index: 120;
-    // 会话抽屉收窄: 小屏按视口比例, 大屏封顶 224 — 不吃桌面拖拽持久化的宽度
-    width: min(58vw, 224px);
-
-    &.collapsed {
-      transform: translateX(-100%);
-      opacity: 0;
-    }
-  }
 }
 
 @media (max-width: $breakpoint-mobile) {

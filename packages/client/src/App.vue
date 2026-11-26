@@ -159,9 +159,14 @@ watch(() => !isLoginPage.value && !isInviteOnlyPage.value && route.name !== 'des
 const wideViewportQuery = window.matchMedia('(min-width: 769px)');
 const isWideViewport = ref(wideViewportQuery.matches);
 const viewportWidth = ref(window.innerWidth);
-const sidebarLayoutWidth = computed(() => isWideViewport.value
-  ? clampSidebarWidth(appStore.sidebarWidth, sidebarMaxWidth(viewportWidth.value))
-  : SIDEBAR_DEFAULT_WIDTH);
+const usesSessionSidebar = computed(() =>
+  ['hermes.chat', 'hermes.session', 'hermes.globalAgent', 'hermes.globalAgentSession', 'hermes.person'].includes(String(route.name)),
+);
+const sidebarLayoutWidth = computed(() => {
+  if (!isWideViewport.value) return SIDEBAR_DEFAULT_WIDTH;
+  if (usesSessionSidebar.value) return appStore.sessionSidebarWidth;
+  return clampSidebarWidth(appStore.sidebarWidth, sidebarMaxWidth(viewportWidth.value));
+});
 function handleViewportResize() {
   viewportWidth.value = window.innerWidth;
 }
@@ -381,6 +386,7 @@ useKeyboard();
               v-if="hasNavigationRail && !isWideViewport"
               v-model:show="mobileNavigationOpen"
               :has-sidebar="hasMobileContextSidebar"
+              :compact="usesSessionSidebar"
               @target="mobileSidebarHost = $event"
             />
             <div

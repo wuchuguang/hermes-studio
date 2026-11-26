@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NDrawer } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import StudioNavigationRail from './StudioNavigationRail.vue'
 
-defineProps<{ show: boolean; hasSidebar: boolean }>()
+const props = defineProps<{ show: boolean; hasSidebar: boolean; compact?: boolean }>()
+const drawerWidth = computed(() => {
+  if (!props.hasSidebar) return 64
+  return props.compact ? 'min(248px, 75vw)' : 'min(380px, 90vw)'
+})
 const emit = defineEmits<{
   'update:show': [show: boolean]
   target: [element: HTMLElement | null]
@@ -14,7 +19,7 @@ const { t } = useI18n()
 <template>
   <NDrawer
     :show="show"
-    :width="hasSidebar ? 'min(380px, 90vw)' : 64"
+    :width="drawerWidth"
     placement="left"
     display-directive="show"
     class="studio-mobile-drawer"

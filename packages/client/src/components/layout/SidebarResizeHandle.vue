@@ -2,15 +2,21 @@
 import { computed, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/hermes/app'
-import { clampSidebarWidth, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, sidebarMaxWidth } from '@/utils/sidebar-width'
+import { clampSidebarWidth, SESSION_SIDEBAR_DEFAULT_WIDTH, SESSION_SIDEBAR_MAX_WIDTH, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_MIN_WIDTH, sidebarMaxWidth } from '@/utils/sidebar-width'
 
+const props = defineProps<{ sessionList?: boolean }>()
 const appStore = useAppStore()
 const { t } = useI18n()
 const handle = ref<HTMLElement | null>(null)
 const resizing = ref(false)
 const viewportWidth = ref(window.innerWidth)
-const maxWidth = computed(() => sidebarMaxWidth(viewportWidth.value))
-const width = computed(() => clampSidebarWidth(appStore.sidebarWidth, maxWidth.value))
+const maxWidth = computed(() => props.sessionList ? SESSION_SIDEBAR_MAX_WIDTH : sidebarMaxWidth(viewportWidth.value))
+const storedWidth = computed(() => props.sessionList ? appStore.sessionSidebarWidth : appStore.sidebarWidth)
+const width = computed(() => clampSidebarWidth(storedWidth.value, maxWidth.value))
+
+function setWidth(value: number, persist = true) {
+  appStore.setSidebarWidth(clampSidebarWidth(value, maxWidth.value), persist, props.sessionList)
+}
 let drag: { pointerId: number; startX: number; startWidth: number; direction: number } | null = null
 
 function direction() {
@@ -31,9 +37,7 @@ function startResize(event: PointerEvent) {
 
 function moveResize(event: PointerEvent) {
   if (!drag || event.pointerId !== drag.pointerId) return
-  appStore.setSidebarWidth(clampSidebarWidth(
-    drag.startWidth + (event.clientX - drag.startX) * drag.direction, maxWidth.value,
-  ), false)
+  setWidth(drag.startWidth + (event.clientX - drag.startX) * drag.direction, false)
 }
 
 function stopResize() {
@@ -41,7 +45,7 @@ function stopResize() {
   const pointerId = drag.pointerId
   drag = null
   if (handle.value?.hasPointerCapture(pointerId)) handle.value.releasePointerCapture(pointerId)
-  appStore.setSidebarWidth(appStore.sidebarWidth)
+  appStore.setSidebarWidth(storedWidth.value, true, props.sessionList)
   appStore.sidebarResizing = false
   resizing.value = false
   window.removeEventListener('pointermove', moveResize)
@@ -58,11 +62,12 @@ function resizeWithKeyboard(event: KeyboardEvent) {
     : event.key === 'ArrowRight' ? width.value + delta * direction() : null
   if (next === null) return
   event.preventDefault()
-  appStore.setSidebarWidth(clampSidebarWidth(next, maxWidth.value))
+  setWidth(next)
 }
 
 function resetToDefault() {
-  appStore.setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)
+  const defaultWidth = props.sessionList ? SESSION_SIDEBAR_DEFAULT_WIDTH : SIDEBAR_DEFAULT_WIDTH
+  appStore.setSidebarWidth(defaultWidth, true, props.sessionList)
 }
 
 function onViewportResize() {

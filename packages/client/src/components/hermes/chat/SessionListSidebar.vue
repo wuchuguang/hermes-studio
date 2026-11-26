@@ -10,7 +10,7 @@ defineProps<{ expanded: boolean; navigation?: boolean }>()
 <template>
   <PageSidebar>
     <aside v-bind="$attrs" class="session-list" :class="{ collapsed: !expanded, 'session-list--navigation': navigation }">
-      <SidebarResizeHandle />
+      <SidebarResizeHandle session-list />
       <div v-if="expanded" class="page-sidebar-top"><slot name="header" /></div>
       <div v-if="expanded && !navigation" class="session-items"><slot /></div>
       <PageSidebarFooter v-if="expanded" />
@@ -54,8 +54,8 @@ defineProps<{ expanded: boolean; navigation?: boolean }>()
     height: auto;
     margin: 0;
     z-index: 120;
-    // 与 ChatPanel 的 .session-list mobile 分支保持一致（两处 scoped 规则都会命中根元素）
-    width: min(58vw, 224px);
+    // PageSidebar can also render outside the shared mobile drawer.
+    width: min(58vw, 184px);
 
     &.collapsed { transform: translateX(-100%); opacity: 0; }
   }
