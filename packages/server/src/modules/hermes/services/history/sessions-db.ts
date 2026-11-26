@@ -1,6 +1,6 @@
 import { getActiveProfileDir, getHermesBaseDir } from '../profiles/profile'
 import { basename, dirname, join } from 'path'
-import { existsSync, readdirSync } from 'fs'
+import { existsSync, readdirSync, statSync } from 'fs'
 import type { LocalUsageStats, UsageStatsFilters } from '../../../studio/contracts/runs/usage'
 import { emptyCostCoverage } from '../../../studio/public/usage'
 import type { ExternalSkillUsageEvent } from '../../../studio/contracts/skills'
@@ -148,7 +148,8 @@ function allSessionDbPaths(): string[] {
  * embed a timestamp, and a chain never spans two dbs.
  */
 function loadAllSessionsAcrossProfiles(): SessionIndex {
-  const cacheKey = `all:${allSessionDbPaths().join('|')}`
+  const dbPaths = allSessionDbPaths()
+  const cacheKey = `all:${dbPaths.join('|')}`
   const now = Date.now()
   const hit = sessionIndexCache.get(cacheKey)
   if (hit && now - hit.at < SESSION_INDEX_CACHE_TTL_MS) return hit.idx
@@ -156,25 +157,21 @@ function loadAllSessionsAcrossProfiles(): SessionIndex {
   const byId = new Map<string, HermesSessionInternalRow>()
   const childrenByParent = new Map<string, string[]>()
   const { DatabaseSync } = require('node:sqlite')
-  for (const dbPath of allSessionDbPaths()) {
-    let db: any = null
+  for (const dbPath of dbPaths) {
     try {
-      db = new DatabaseSync(dbPath, { open: true, readOnly: true })
-      const one = loadAllSessions(db)
-      // Tag every row with its owning profile: consumers (sidebar merge, resume,
-      // paginated messages) need it to address the *WithProfile read APIs.
+      const one = loadSessionIndexForDb(dbPath, () => {
+        const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+        try { return loadAllSessions(db) } finally { db.close() }
+      })
+      // Tag the merged rows without modifying the shared per-profile index.
       const profile = profileForDbPath(dbPath)
-      for (const [id, row] of one.byId) {
-        row.profile = profile
-        byId.set(id, row)
-      }
+      for (const [id, row] of one.byId) byId.set(id, { ...row, profile })
       for (const [parent, ids] of one.childrenByParent) {
-        const list = childrenByParent.get(parent) || []
-        list.push(...ids)
-        childrenByParent.set(parent, list)
+        const list = childrenByParent.get(parent)
+        if (list) list.push(...ids)
+        else childrenByParent.set(parent, [...ids])
       }
     } catch { /* a missing/corrupt profile db must not break the listing */ }
-    finally { try { db?.close() } catch {} }
   }
   const idx: SessionIndex = { byId, childrenByParent }
   sessionIndexCache.set(cacheKey, { at: now, idx })
@@ -252,7 +249,7 @@ const SESSION_SELECT = `
   COALESCE(s.cost_status, '') AS cost_status,
   COALESCE(
     (
-      SELECT SUBSTR(REPLACE(REPLACE(m.content, CHAR(10), ' '), CHAR(13), ' '), 1, 63)
+      SELECT REPLACE(REPLACE(SUBSTR(m.content, 1, 63), CHAR(10), ' '), CHAR(13), ' ')
       FROM messages m
       WHERE m.session_id = s.id AND m.role = 'user' AND m.content IS NOT NULL
       ORDER BY m.timestamp, m.id
@@ -535,13 +532,10 @@ interface SessionIndex {
   childrenByParent: Map<string, string[]>
 }
 
-// Short-lived cache for the full-session index. loadAllSessions() reads every
-// session row on each call, which dominates list latency once the db grows
-// past a few thousand sessions. Session metadata only changes when a message
-// lands, so a TTL of a few seconds is safe and keeps chains (including brand
-// new continuations) visible almost immediately.
+// Coalesce concurrent requests and bound how long an active profile can be stale.
 const SESSION_INDEX_CACHE_TTL_MS = 3_000
-const sessionIndexCache = new Map<string, { at: number; idx: SessionIndex }>()
+const SESSION_INDEX_RECHECK_MS = 60_000
+const sessionIndexCache = new Map<string, { at: number; idx: SessionIndex; revision?: string }>()
 
 function loadAllSessions(db: { prepare: (sql: string) => { all: (...params: any[]) => Record<string, unknown>[] } }): SessionIndex {
   const rows = db.prepare(`
@@ -563,14 +557,27 @@ function loadAllSessions(db: { prepare: (sql: string) => { all: (...params: any[
   return { byId, childrenByParent }
 }
 
-/** loadAllSessions with a per-db-file TTL cache (see SESSION_INDEX_CACHE_TTL_MS). */
-function loadAllSessionsCached(db: { prepare: (sql: string) => { all: (...params: any[]) => Record<string, unknown>[] } }, dbPath: string): SessionIndex {
+function sessionDbRevision(dbPath: string): string | undefined {
+  const db = statSync(dbPath, { bigint: true, throwIfNoEntry: false })
+  if (!db) return undefined
+  // WAL-mode commits can change only the WAL file, without touching state.db.
+  const wal = statSync(`${dbPath}-wal`, { bigint: true, throwIfNoEntry: false })
+  return [db.ino, db.size, db.mtimeNs, db.ctimeNs, wal?.ino, wal?.size, wal?.mtimeNs, wal?.ctimeNs].join(':')
+}
+
+function loadSessionIndexForDb(dbPath: string, load: () => SessionIndex): SessionIndex {
   const now = Date.now()
   const hit = sessionIndexCache.get(dbPath)
   if (hit && now - hit.at < SESSION_INDEX_CACHE_TTL_MS) return hit.idx
-  const idx = loadAllSessions(db)
-  sessionIndexCache.set(dbPath, { at: now, idx })
+  const revision = sessionDbRevision(dbPath)
+  if (hit && revision && hit.revision === revision && now - hit.at < SESSION_INDEX_RECHECK_MS) return hit.idx
+  const idx = load()
+  sessionIndexCache.set(dbPath, { at: now, idx, revision })
   return idx
+}
+
+function loadAllSessionsCached(db: Parameters<typeof loadAllSessions>[0], dbPath: string): SessionIndex {
+  return loadSessionIndexForDb(dbPath, () => loadAllSessions(db))
 }
 
 type SessionLookupDb = {
